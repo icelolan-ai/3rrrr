@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>RUBRIC — Interactive 3D Explosion Experience</title>
+<meta name="description" content="An interactive scroll-driven 3D presentation of a Rubik's cube — drag to rotate, scroll to explode." />
+<meta name="theme-color" content="#0a0a0c" />
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+
+  <!-- ============ LOADING OVERLAY ============ -->
+  <div id="loading-overlay" class="loading-overlay" role="status" aria-live="polite">
+    <div class="loading-inner">
+      <div class="loading-cube">
+        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <p class="loading-label">กำลังโหลดโมเดล 3D</p>
+      <div class="loading-bar-track">
+        <div id="loading-bar-fill" class="loading-bar-fill"></div>
+      </div>
+      <p id="loading-percent" class="loading-percent">0%</p>
+    </div>
+  </div>
+
+  <!-- ============ ERROR OVERLAY ============ -->
+  <div id="error-overlay" class="error-overlay" hidden>
+    <div class="error-inner">
+      <div class="error-icon">!</div>
+      <h2>โหลดโมเดลไม่สำเร็จ</h2>
+      <p id="error-message">ไม่สามารถโหลดไฟล์ 3D ได้ กรุณาตรวจสอบเส้นทางไฟล์ในโฟลเดอร์ models/ และลองรีเฟรชหน้าอีกครั้ง</p>
+      <button id="error-retry-btn" class="btn btn-primary">ลองใหม่อีกครั้ง</button>
+    </div>
+  </div>
+
+  <!-- ============ TOP NAV ============ -->
+  <header class="site-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-text">RUBRIC<span class="brand-accent">.3D</span></span>
+    </div>
+    <nav class="site-nav">
+      <a href="#viewer-section">Experience</a>
+      <a href="#details-section">Details</a>
+      <a href="#deploy-section">Deploy</a>
+    </nav>
+  </header>
+
+  <!-- ============ HERO (asymmetrical bento intro) ============ -->
+  <section class="hero" id="hero">
+    <div class="hero-grid">
+      <div class="hero-cell hero-title-cell">
+        <p class="eyebrow">Interactive 3D Product Presentation</p>
+        <h1 class="hero-title">แยกชิ้นส่วน<br><span class="hero-title-accent">ทีละมิติ</span></h1>
+        <p class="hero-sub">ลากเพื่อหมุนโมเดล เลื่อนหน้าจอเพื่อควบคุมการระเบิดของลูกบาศก์รูบิกสีแดงเมทัลลิก — real-time, ควบคุมได้ทุกเฟรม</p>
+        <a href="#viewer-section" class="btn btn-primary hero-cta">เริ่มสำรวจ <span class="cta-arrow">↓</span></a>
+      </div>
+      <div class="hero-cell hero-stat-cell reveal">
+        <span class="stat-num">27</span>
+        <span class="stat-label">ชิ้นส่วนคิวเล็ต<br>เคลื่อนไหวอิสระ</span>
+      </div>
+      <div class="hero-cell hero-stat-cell reveal">
+        <span class="stat-num">0–100%</span>
+        <span class="stat-label">Scroll-Driven<br>Progress Timeline</span>
+      </div>
+      <div class="hero-cell hero-glow-cell reveal" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <!-- ============ STICKY 3D VIEWER SECTION ============ -->
+  <section id="viewer-section" class="viewer-section">
+    <div class="viewer-sticky">
+
+      <canvas id="viewer-canvas" class="viewer-canvas"></canvas>
+
+      <!-- HUD overlay -->
+      <div class="hud">
+        <div class="hud-top">
+          <div class="instructions" id="instructions">
+            <span class="instr-item"><span class="instr-key">DRAG</span> = หมุนโมเดล</span>
+            <span class="instr-sep">/</span>
+            <span class="instr-item"><span class="instr-key">SCROLL</span> = ระเบิดชิ้นส่วน</span>
+          </div>
+          <button id="reset-btn" class="btn btn-ghost reset-btn" type="button" aria-label="รีเซ็ตมุมมองทั้งหมด">
+            <span class="reset-icon" aria-hidden="true">↺</span> RESET
+          </button>
+        </div>
+
+        <div class="hud-bottom">
+          <div class="progress-wrap" aria-hidden="false">
+            <span class="progress-label-left">NORMAL</span>
+            <div class="progress-track">
+              <div id="progress-fill" class="progress-fill"></div>
+              <div id="progress-dot" class="progress-dot"></div>
+            </div>
+            <span class="progress-label-right">EXPLODED</span>
+            <span id="progress-percent" class="progress-percent">0%</span>
+          </div>
+
+          <div class="qol-controls">
+            <button id="autorotate-btn" class="btn btn-icon" type="button" title="สลับหมุนอัตโนมัติ" aria-pressed="false">⟳</button>
+            <button id="env-btn" class="btn btn-icon" type="button" title="สลับแสงแวดล้อม" aria-pressed="true">☀</button>
+            <button id="fullscreen-btn" class="btn btn-icon" type="button" title="เต็มจอ">⛶</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="scroll-cue" id="scroll-cue" aria-hidden="true">
+        <span>เลื่อนลงเพื่อระเบิดโมเดล</span>
+        <span class="scroll-cue-arrow">↓</span>
+      </div>
+    </div>
+
+    <!-- tall scroll track that drives progress; height set responsively in CSS -->
+    <div class="scroll-track" aria-hidden="true"></div>
+  </section>
+
+  <!-- ============ DETAILS / BENTO FEATURE GRID ============ -->
+  <section id="details-section" class="details-section">
+    <div class="section-head reveal">
+      <p class="eyebrow">How it works</p>
+      <h2>สถาปัตยกรรมของประสบการณ์</h2>
+    </div>
+
+    <div class="bento-grid">
+      <div class="bento-card bento-wide reveal">
+        <h3>True Object Interpolation</h3>
+        <p>ทั้ง 27 คิวเล็ตถูกจับคู่แบบ node-to-node ระหว่างโมเดลปกติและโมเดลระเบิด ตำแหน่งเริ่ม/ปลายถูกอ่านจาก keyframe จริงในไฟล์ GLB แล้ว interpolate ด้วยเวกเตอร์ — ไม่ใช่การสลับโมเดล</p>
+      </div>
+      <div class="bento-card reveal">
+        <h3>Scroll = Timeline</h3>
+        <p>ตำแหน่ง scroll ถูกแปลงเป็นค่า progress 0.0–1.0 แบบ deterministic กลับไปตำแหน่งเดิมได้เป๊ะทุกครั้ง</p>
+      </div>
+      <div class="bento-card reveal">
+        <h3>Gesture-Safe Input</h3>
+        <p>ระบบแยกท่าทางลากแนวนอน (หมุน) ออกจากแนวตั้ง (scroll) บนมือถือ เพื่อไม่ให้ชนกัน</p>
+      </div>
+      <div class="bento-card reveal">
+        <h3>PBR Metallic Lighting</h3>
+        <p>ใช้ physically-based rendering พร้อม environment lighting แบบ procedural เพื่อคงลุคแดงเมทัลลิกมันวาว</p>
+      </div>
+      <div class="bento-card bento-wide reveal">
+        <h3>Modular & Extensible</h3>
+        <p>แยกเป็น SceneManager, ModelManager, AnimationManager, ScrollController, InteractionController, CameraController, LightingManager, UIManager — พร้อมต่อยอด hotspot, isolate part, label ในอนาคต</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DEPLOY / OUTRO ============ -->
+  <section id="deploy-section" class="deploy-section">
+    <div class="deploy-inner reveal">
+      <p class="eyebrow">Ready for GitHub Pages</p>
+      <h2>อัปโหลดแล้วใช้งานได้ทันที</h2>
+      <p class="deploy-sub">โปรเจกต์นี้เป็น static site ล้วน ไม่มี backend ไม่มี Windows path — ดูวิธีติดตั้งแบบละเอียดใน README.md</p>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <span>© 2026 RUBRIC.3D — Built with Three.js</span>
+  </footer>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/three.module.min.js",
+      "three/addons/loaders/GLTFLoader.js": "./vendor/three/examples/jsm/loaders/GLTFLoader.js",
+      "three/addons/environments/RoomEnvironment.js": "./vendor/three/examples/jsm/environments/RoomEnvironment.js"
+    }
+  }
+  </script>
+  <script type="module" src="./script.js"></script>
+</body>
+</html>
