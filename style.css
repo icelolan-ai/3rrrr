@@ -257,6 +257,7 @@ button{ font-family:inherit; cursor:pointer; }
   display:flex; align-items:center; justify-content:center;
   padding:24px;
 }
+.error-overlay[hidden]{ display:none; }
 .error-inner{
   max-width:640px; max-height:80vh; overflow-y:auto;
   text-align:center;
