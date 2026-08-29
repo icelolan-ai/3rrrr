@@ -8,14 +8,15 @@
      ModelManager             loads GLB(s), matches nodes, records A/B transforms
      CameraController          spherical orbit camera, zoom, framing, reset
      AnimationManager           progress -> per-cubelet transform interpolation
-     ScrollController            per-section scroll -> deterministic progress
+     MasterScrollController      one continuous scroll -> phase + progress
      InteractionController        drag rotate / pinch zoom / gesture gating
      PanelUIManager                per-panel HUD, reset button, progress bar
      ResponsiveManager             resize / orientation / DPR handling
      ThemeManager                  shared dark/light site theme toggle
      GlobalChrome                  shared menu, reveals, error overlay
-     Experience                    one full 3D showcase (scene+model+scroll)
-     App                           creates the Experiences, shared chrome
+     MasterExperience               the whole journey: Ghost -> 3D transition
+                                     -> Rubik's Cube -> explode, one scene
+     App                           bootstraps the MasterExperience, chrome
    ========================================================================== */
 
 import * as THREE from 'three';
@@ -32,36 +33,44 @@ const Utils = {
   damp: (current, target, lambda, dt) => Utils.lerp(current, target, 1 - Math.exp(-lambda * dt)),
   easeInOutCubic: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
   isTouchDevice: () => ('ontouchstart' in window) || navigator.maxTouchPoints > 0,
+  // Shifts `angle` by whole turns so it lands within one revolution of `ref`
+  // (shortest angular path) — used when lerping camera azimuth toward a
+  // fixed target so a wildly-spun starting angle doesn't produce a multi-turn
+  // spin during the scripted transition pan.
+  wrapAngleNear: (angle, ref) => {
+    const twoPi = Math.PI * 2;
+    let diff = (angle - ref) % twoPi;
+    if (diff > Math.PI) diff -= twoPi;
+    if (diff < -Math.PI) diff += twoPi;
+    return ref + diff;
+  },
 };
 
-// Each entry describes one independent scroll-driven 3D showcase.
+// Two independent GLB sources sharing one scene (see MasterExperience).
 // mode:'dual'   — a normal.glb + a separately-exported exploded.glb, matched
 //                 by node name (the exploded file's baked keyframes are only
 //                 ever read for their final position, never displayed).
 // mode:'single' — one glb whose pieces each carry their own animation clip,
 //                 keyframed from the assembled pose to the exploded pose;
 //                 the same file is displayed AND mined for explode targets.
-const EXPERIENCE_CONFIGS = [
-  {
-    sectionId: 'ghost-showcase',
-    rootName: 'GhostRoot',
-    mode: 'single',
-    paths: {
-      single: './models/ghost_cube_steel_blue.glb',
-    },
-    loadingKeys: { single: 'ghost' },
+const GHOST_CONFIG = {
+  rootName: 'GhostRoot',
+  mode: 'single',
+  paths: {
+    single: './models/ghost_cube_steel_blue.glb',
   },
-  {
-    sectionId: 'rubik-showcase',
-    rootName: 'RubikRoot',
-    mode: 'dual',
-    paths: {
-      normal: './models/rubric3x3x3_red.glb',
-      exploded: './models/rubric3x3x3_red_explode.glb',
-    },
-    loadingKeys: { normal: 'rubik-normal', exploded: 'rubik-exploded' },
+  loadingKeys: { single: 'ghost' },
+};
+
+const RUBIK_CONFIG = {
+  rootName: 'RubikRoot',
+  mode: 'dual',
+  paths: {
+    normal: './models/rubric3x3x3_red.glb',
+    exploded: './models/rubric3x3x3_red_explode.glb',
   },
-];
+  loadingKeys: { normal: 'rubik-normal', exploded: 'rubik-exploded' },
+};
 
 /* ==========================================================================
    LoadingManager
@@ -493,6 +502,18 @@ class CameraController {
     this._userZoomed = true;
   }
 
+  /** Hard-sets the camera pose immediately (no spring/damping) — used by the
+   *  scripted 3D-transition pan, which drives theta/phi/radius/target itself
+   *  as a pure function of scroll progress rather than easing toward a
+   *  target frame-by-frame. */
+  setPose(theta, phi, radius, target) {
+    this.theta = this.targetTheta = theta;
+    this.phi = this.targetPhi = phi;
+    this.radius = this.targetRadius = radius;
+    this.target.copy(target);
+    this._updatePosition();
+  }
+
   rotateBy(deltaThetaPx, deltaPhiPx, sensitivity = 0.006) {
     this.targetTheta -= deltaThetaPx * sensitivity;
     this.targetPhi = Utils.clamp(this.targetPhi - deltaPhiPx * sensitivity, this.minPhi, this.maxPhi);
@@ -596,49 +617,6 @@ class AnimationManager {
 }
 
 /* ==========================================================================
-   ScrollController
-   Converts scroll position into a deterministic target progress value,
-   scoped to one .showcase section: 0 while that section's top edge is at
-   (or below) the viewport top, 1 once its bottom edge has been scrolled up
-   to the viewport bottom — exactly the range its sticky viewer-panel stays
-   pinned for. The caller smooths toward this target. Progress is always
-   re-derived from the section's live position -> no drift, exact restoration.
-   ========================================================================== */
-class ScrollController {
-  constructor(sectionEl) {
-    this.sectionEl = sectionEl;
-    this.currentProgress = 0;
-    this.targetProgress = 0;
-    this.smoothing = 9; // higher = snappier response to scroll
-
-    this._onScroll = this._onScroll.bind(this);
-    window.addEventListener('scroll', this._onScroll, { passive: true });
-    window.addEventListener('resize', this._onScroll);
-    this._onScroll();
-  }
-
-  _onScroll() {
-    const rect = this.sectionEl.getBoundingClientRect();
-    const scrollableRange = Math.max(this.sectionEl.offsetHeight - window.innerHeight, 1);
-    const scrolledIntoSection = -rect.top;
-    this.targetProgress = Utils.clamp(scrolledIntoSection / scrollableRange, 0, 1);
-  }
-
-  update(dt) {
-    this.currentProgress = Utils.damp(this.currentProgress, this.targetProgress, this.smoothing, dt);
-    if (Math.abs(this.currentProgress - this.targetProgress) < 0.0004) {
-      this.currentProgress = this.targetProgress; // settle exactly, no lingering drift
-    }
-    return this.currentProgress;
-  }
-
-  scrollToStart() {
-    const top = window.scrollY + this.sectionEl.getBoundingClientRect().top;
-    window.scrollTo({ top, behavior: 'smooth' });
-  }
-}
-
-/* ==========================================================================
    InteractionController
    The 3D panel is a fixed side panel (not part of the scrollable flow), so
    rotation and page scroll never compete for the same gesture: dragging on
@@ -652,6 +630,9 @@ class InteractionController {
     this.cameraController = cameraController;
 
     this.isDragging = false; // exposed for tactile "grab" scale feedback
+    // gated off during the scripted 3D transition, so drag/pinch don't fight
+    // the automatic camera pan between the Ghost and Rubik phases
+    this.enabled = true;
     this._lastX = 0;
     this._lastY = 0;
     this._lastDx = 0; // smoothed latest delta, used as release velocity for fling
@@ -666,6 +647,7 @@ class InteractionController {
   _bind() {
     // Pointer drag (mouse + touch alike) — always rotates, any time.
     this.canvas.addEventListener('pointerdown', (e) => {
+      if (!this.enabled) return;
       if (e.pointerType === 'touch' && this._activeTouches() >= 2) return; // let pinch handle it
       this.isDragging = true;
       this._lastX = e.clientX;
@@ -699,6 +681,7 @@ class InteractionController {
     // the page (and therefore the explode timeline) — only modified wheel
     // events are captured for zoom.
     this.canvas.addEventListener('wheel', (e) => {
+      if (!this.enabled) return;
       if (e.ctrlKey || e.metaKey || e.shiftKey) {
         e.preventDefault();
         const factor = 1 + e.deltaY * 0.0025;
@@ -718,6 +701,7 @@ class InteractionController {
   }
 
   _onTouchStart(e) {
+    if (!this.enabled) return;
     this._touchCount = e.touches.length;
     if (e.touches.length === 2) {
       this.isDragging = false;
@@ -727,6 +711,7 @@ class InteractionController {
   }
 
   _onTouchMove(e) {
+    if (!this.enabled) return;
     this._touchCount = e.touches.length;
     if (e.touches.length === 2) {
       e.preventDefault();
@@ -919,12 +904,14 @@ class GlobalChrome {
     });
   }
 
+  /** Two-way reveal: text fades IN as it scrolls into view and fades back
+   *  OUT once scrolled past, rather than staying visible forever. */
   _bindReveals() {
     const items = document.querySelectorAll('.reveal');
     const io = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
-          if (entry.isIntersecting) entry.target.classList.add('in-view');
+          entry.target.classList.toggle('in-view', entry.isIntersecting);
         });
       },
       { threshold: 0.2 }
@@ -962,18 +949,84 @@ class ResponsiveManager {
 }
 
 /* ==========================================================================
-   Experience — orchestrates one independent scroll-driven 3D showcase
-   (its own scene, model, camera, scroll range, and panel HUD). A page can
-   host several of these side by side, each fully self-contained.
+   MasterScrollController
+   Converts ONE continuous page scroll into a phase + local progress, using
+   three invisible marker elements to split the single #main-showcase section
+   into four ranges: 'ghost' -> 'transition' -> 'rubikText' -> 'explode'.
+   Marker-to-section distances are measured via getBoundingClientRect, which
+   stays scroll-invariant (both move by the same amount), so no document-flow
+   offset math is needed. Recomputed on every scroll/resize, so it stays
+   correct if content reflows (e.g. KaTeX finishing render).
    ========================================================================== */
-class Experience {
-  constructor(sectionEl, config, loadingManager) {
+class MasterScrollController {
+  constructor(sectionEl, markers) {
     this.sectionEl = sectionEl;
-    this.config = config;
+    this.markers = markers; // { ghostEnd, transitionEnd, rubikTextEnd }
+    this.smoothing = 9;
+    this.smoothedGlobal = 0;
+    this.targetGlobal = 0;
+    this._bounds = { d1: 1, d2: 2, d3: 3, d4: 4 };
+    this.current = { phase: 'ghost', t: 0, global: 0 };
+
+    this._onScroll = this._onScroll.bind(this);
+    window.addEventListener('scroll', this._onScroll, { passive: true });
+    window.addEventListener('resize', this._onScroll);
+    this._onScroll();
+  }
+
+  _onScroll() {
+    const sectionRect = this.sectionEl.getBoundingClientRect();
+    const d1 = this.markers.ghostEnd.getBoundingClientRect().top - sectionRect.top;
+    const d2 = this.markers.transitionEnd.getBoundingClientRect().top - sectionRect.top;
+    const d3 = this.markers.rubikTextEnd.getBoundingClientRect().top - sectionRect.top;
+    const d4 = Math.max(this.sectionEl.offsetHeight - window.innerHeight, d3 + 1);
+    this._bounds = { d1, d2, d3, d4 };
+    this.targetGlobal = Utils.clamp(-sectionRect.top, 0, d4);
+  }
+
+  update(dt) {
+    this.smoothedGlobal = Utils.damp(this.smoothedGlobal, this.targetGlobal, this.smoothing, dt);
+    if (Math.abs(this.smoothedGlobal - this.targetGlobal) < 0.05) this.smoothedGlobal = this.targetGlobal;
+
+    const { d1, d2, d3, d4 } = this._bounds;
+    const s = this.smoothedGlobal;
+    let phase, t;
+    if (s <= d1) {
+      phase = 'ghost';
+      t = d1 > 0 ? s / d1 : 1;
+    } else if (s <= d2) {
+      phase = 'transition';
+      t = d2 > d1 ? (s - d1) / (d2 - d1) : 1;
+    } else if (s <= d3) {
+      phase = 'rubikText';
+      t = d3 > d2 ? (s - d2) / (d3 - d2) : 1;
+    } else {
+      phase = 'explode';
+      t = d4 > d3 ? (s - d3) / (d4 - d3) : 1;
+    }
+    this.current = { phase, t: Utils.clamp(t, 0, 1), global: s };
+    return this.current;
+  }
+}
+
+/* ==========================================================================
+   MasterExperience — the entire scroll-driven journey as ONE shared Three.js
+   scene/camera/canvas: Ghost Cube (orbit only) -> a literal 3D transition
+   where both models coexist and the camera pans between them -> Rubik's
+   Cube (orbit only) -> the Rubik's Cube's own explode/reassemble at the very
+   end. Everything is a pure function of one continuous scroll progress, so
+   scrolling back up reverses the whole sequence exactly.
+   ========================================================================== */
+class MasterExperience {
+  constructor(sectionEl, loadingManager) {
+    this.sectionEl = sectionEl;
     this.loadingManager = loadingManager;
     this.canvas = sectionEl.querySelector('.viewer-canvas');
     this.panelRoot = sectionEl.querySelector('.viewer-panel');
     this.sceneManager = new SceneManager(this.canvas);
+    this._phase = 'ghost';
+    this._framedFor = null;
+    this._grabScale = 1;
   }
 
   async init() {
@@ -981,15 +1034,41 @@ class Experience {
       this.cameraController?.reframe()
     );
     this.lightingManager = new LightingManager(this.sceneManager);
-    this.modelManager = new ModelManager(this.sceneManager, this.loadingManager, this.config);
+
+    this.ghostModel = new ModelManager(this.sceneManager, this.loadingManager, GHOST_CONFIG);
+    this.rubikModel = new ModelManager(this.sceneManager, this.loadingManager, RUBIK_CONFIG);
+    await Promise.all([this.ghostModel.loadAll(), this.rubikModel.loadAll()]);
+
+    this.ghostAnim = new AnimationManager(this.ghostModel);
+    this.rubikAnim = new AnimationManager(this.rubikModel);
+
+    // Red Cube starts hidden/collapsed inside the Ghost Cube until the
+    // transition phase grows it out.
+    this.rubikModel.root.visible = false;
+    this.rubikModel.root.scale.setScalar(0.001);
+
     this.cameraController = new CameraController(this.sceneManager);
 
-    await this.modelManager.loadAll();
+    // Frame both models once up front to capture each one's own "resting"
+    // pose — the transition pans from the live Ghost pose toward the fixed
+    // Rubik resting pose captured here.
+    this.cameraController.frameToRange(this.ghostModel.boundingSphere, this.ghostModel.explodedBoundingSphere);
+    this._ghostDefaultPose = this._capturePose();
+    this.cameraController.frameToRange(this.rubikModel.boundingSphere, this.rubikModel.explodedBoundingSphere);
+    this._rubikDefaultPose = this._capturePose();
 
-    this.cameraController.frameToRange(this.modelManager.boundingSphere, this.modelManager.explodedBoundingSphere);
-    this.animationManager = new AnimationManager(this.modelManager);
-    this.scrollController = new ScrollController(this.sectionEl);
+    // Start the actual experience framed on the Ghost Cube.
+    this.cameraController.frameToRange(this.ghostModel.boundingSphere, this.ghostModel.explodedBoundingSphere);
+    this._framedFor = 'ghost';
+    this._liveGhostPose = { ...this._ghostDefaultPose, target: this._ghostDefaultPose.target.clone() };
+
     this.interactionController = new InteractionController(this.canvas, this.cameraController);
+
+    this.scrollController = new MasterScrollController(this.sectionEl, {
+      ghostEnd: document.getElementById('marker-ghost-end'),
+      transitionEnd: document.getElementById('marker-transition-end'),
+      rubikTextEnd: document.getElementById('marker-rubik-text-end'),
+    });
 
     this.panelUI = new PanelUIManager(this.panelRoot, {
       cameraController: this.cameraController,
@@ -1001,39 +1080,111 @@ class Experience {
     this.sceneManager.start();
   }
 
-  _tick(dt) {
-    const progress = this.scrollController.update(dt);
-    this.animationManager.setProgress(progress);
-    this.cameraController.setExplodeRadius(progress);
-    this.cameraController.update(dt);
-    this.panelUI.updateProgressUI(progress);
+  _capturePose() {
+    return {
+      theta: this.cameraController.theta,
+      phi: this.cameraController.phi,
+      radius: this.cameraController.targetRadius,
+      target: this.cameraController.target.clone(),
+    };
+  }
 
-    // Tactile "grab" feedback: the model eases to a slightly smaller scale
-    // while actively being dragged, and springs back to normal on release.
-    const targetScale = this.interactionController.isDragging ? 0.965 : 1;
-    const root = this.modelManager.root;
-    const nextScale = Utils.damp(root.scale.x, targetScale, 10, dt);
-    root.scale.setScalar(nextScale);
+  _tick(dt) {
+    const { phase, t } = this.scrollController.update(dt);
+
+    // Tactile "grab" feedback while actively dragging whichever model is
+    // currently orbit-able; a no-op (settles to 1) during the transition,
+    // since drag input is disabled there.
+    this._grabScale = Utils.damp(this._grabScale, this.interactionController.isDragging ? 0.965 : 1, 10, dt);
+
+    if (phase === 'ghost') {
+      if (this._framedFor !== 'ghost') {
+        this.cameraController.frameToRange(this.ghostModel.boundingSphere, this.ghostModel.explodedBoundingSphere);
+        this.cameraController.setPose(
+          this._liveGhostPose.theta,
+          this._liveGhostPose.phi,
+          this._liveGhostPose.radius,
+          this._liveGhostPose.target
+        );
+        this._framedFor = 'ghost';
+      }
+
+      this.ghostModel.root.visible = true;
+      this.rubikModel.root.visible = false;
+      this.ghostAnim.setProgress(0);
+      this.ghostModel.root.scale.setScalar(this._grabScale);
+
+      this.interactionController.enabled = true;
+      this.cameraController.update(dt);
+      this._liveGhostPose = this._capturePose();
+      this.panelUI.updateProgressUI(0);
+    } else if (phase === 'transition') {
+      if (this.interactionController.isDragging) this.interactionController.isDragging = false;
+      this.interactionController.enabled = false;
+      this.cameraController.cancelFling();
+
+      this.ghostModel.root.visible = true;
+      this.rubikModel.root.visible = true;
+
+      const eased = Utils.easeInOutCubic(t);
+      // The blue cube "expands wide" — reuses its own assembled->exploded
+      // piece animation as the literal expansion — while the red cube grows
+      // from nothing at the shared center out to full size.
+      this.ghostAnim.setProgress(t);
+      this.ghostModel.root.scale.setScalar(1);
+      this.rubikModel.root.scale.setScalar(Utils.lerp(0.001, 1, eased));
+      this.rubikAnim.setProgress(0);
+
+      const from = this._liveGhostPose;
+      const to = this._rubikDefaultPose;
+      const theta = Utils.lerp(Utils.wrapAngleNear(from.theta, to.theta), to.theta, eased);
+      const phi = Utils.lerp(from.phi, to.phi, eased);
+      const radius = Utils.lerp(from.radius, to.radius, eased);
+      const target = from.target.clone().lerp(to.target, eased);
+      this.cameraController.setPose(theta, phi, radius, target);
+
+      this._framedFor = null; // re-frame once we land on either side
+      this.panelUI.updateProgressUI(0);
+    } else {
+      // 'rubikText' or 'explode'
+      if (this._framedFor !== 'rubik') {
+        this.cameraController.frameToRange(this.rubikModel.boundingSphere, this.rubikModel.explodedBoundingSphere);
+        this.cameraController.setPose(
+          this._rubikDefaultPose.theta,
+          this._rubikDefaultPose.phi,
+          this._rubikDefaultPose.radius,
+          this._rubikDefaultPose.target
+        );
+        this._framedFor = 'rubik';
+      }
+
+      this.ghostModel.root.visible = false;
+      this.rubikModel.root.visible = true;
+      this.rubikModel.root.scale.setScalar(this._grabScale);
+
+      this.interactionController.enabled = true;
+      const explodeProgress = phase === 'explode' ? t : 0;
+      this.rubikAnim.setProgress(explodeProgress);
+      this.cameraController.setExplodeRadius(explodeProgress);
+      this.cameraController.update(dt);
+      this.panelUI.updateProgressUI(explodeProgress);
+    }
+
+    this._phase = phase;
   }
 
   reset() {
     this.cameraController.reset();
-    this.scrollController.scrollToStart();
-    // targetProgress will re-derive to 0 once scroll settles at the section
-    // start; force an immediate visual reset too so there is no lag.
-    this.animationManager.resetAnimation();
-    this.scrollController.currentProgress = 0;
-    this.scrollController.targetProgress = 0;
   }
 }
 
 /* ==========================================================================
-   App — creates one Experience per EXPERIENCE_CONFIGS entry, sharing a
-   single loading bar, theme toggle, and page-wide chrome across all of them.
+   App — bootstraps the shared loading bar, theme toggle, page-wide chrome,
+   and the single MasterExperience that drives the whole page.
    ========================================================================== */
 class App {
   constructor() {
-    const loadingKeys = EXPERIENCE_CONFIGS.flatMap((c) => Object.values(c.loadingKeys));
+    const loadingKeys = [...Object.values(GHOST_CONFIG.loadingKeys), ...Object.values(RUBIK_CONFIG.loadingKeys)];
     this.loadingManager = new LoadingManager(loadingKeys);
     this.themeManager = new ThemeManager();
     this.globalChrome = new GlobalChrome();
@@ -1041,12 +1192,9 @@ class App {
 
   async init() {
     try {
-      this.experiences = EXPERIENCE_CONFIGS.map((config) => {
-        const sectionEl = document.getElementById(config.sectionId);
-        return new Experience(sectionEl, config, this.loadingManager);
-      });
-
-      await Promise.all(this.experiences.map((exp) => exp.init()));
+      const sectionEl = document.getElementById('main-showcase');
+      this.experience = new MasterExperience(sectionEl, this.loadingManager);
+      await this.experience.init();
 
       this.loadingManager.complete();
     } catch (err) {
