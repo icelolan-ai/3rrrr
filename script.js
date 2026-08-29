@@ -450,8 +450,21 @@ class CameraController {
   }
 
   frameToSphere(sphere) {
-    const fovRad = (this.camera.fov * Math.PI) / 180;
-    const fitDist = (sphere.radius * 1.65) / Math.sin(fovRad / 2);
+    this._framedSphere = sphere; // remembered so reframe() can redo this after a resize
+
+    // PerspectiveCamera.fov is the VERTICAL field of view; the horizontal
+    // FOV depends on aspect and can be narrower (aspect < 1, a tall/narrow
+    // canvas like the viewer panel usually is). Fitting to vFOV alone
+    // under-shoots the needed distance whenever the horizontal fit is the
+    // tighter constraint, letting the sphere clip past the left/right
+    // edges even though it fits top-to-bottom — so fit to whichever axis
+    // is more restrictive.
+    const vFovRad = (this.camera.fov * Math.PI) / 180;
+    const aspect = this.camera.aspect || 1;
+    const hFovRad = 2 * Math.atan(Math.tan(vFovRad / 2) * aspect);
+    const limitingFovRad = Math.min(vFovRad, hFovRad);
+
+    const fitDist = (sphere.radius * 1.65) / Math.sin(limitingFovRad / 2);
     this.minRadius = Math.max(2.5, sphere.radius * 1.15);
     this.maxRadius = sphere.radius * 6;
     // Upper bound follows maxRadius (not a fixed constant) so a sphere sized
@@ -467,6 +480,14 @@ class CameraController {
       target: this.target.clone(),
     };
     this._updatePosition(true);
+  }
+
+  /** Re-applies the last framing at the camera's current aspect ratio.
+   *  A sphere framed for one aspect can start clipping once the viewport's
+   *  proportions change (window resize, or an iPad/phone rotating between
+   *  portrait and landscape), since the required distance depends on it. */
+  reframe() {
+    if (this._framedSphere) this.frameToSphere(this._framedSphere);
   }
 
   rotateBy(deltaThetaPx, deltaPhiPx, sensitivity = 0.006) {
@@ -888,9 +909,10 @@ class UIManager {
    ResponsiveManager
    ========================================================================== */
 class ResponsiveManager {
-  constructor(canvas, sceneManager) {
+  constructor(canvas, sceneManager, onResize) {
     this.canvas = canvas;
     this.sceneManager = sceneManager;
+    this.onResize = onResize;
     this._resize = this._resize.bind(this);
     window.addEventListener('resize', this._resize);
     window.addEventListener('orientationchange', this._resize);
@@ -900,6 +922,7 @@ class ResponsiveManager {
   _resize() {
     const rect = this.canvas.getBoundingClientRect();
     this.sceneManager.setSize(rect.width || window.innerWidth, rect.height || window.innerHeight);
+    this.onResize?.();
   }
 }
 
@@ -916,7 +939,9 @@ class App {
 
   async init() {
     try {
-      this.responsiveManager = new ResponsiveManager(this.canvas, this.sceneManager);
+      this.responsiveManager = new ResponsiveManager(this.canvas, this.sceneManager, () =>
+        this.cameraController?.reframe()
+      );
       this.lightingManager = new LightingManager(this.sceneManager);
       this.modelManager = new ModelManager(this.sceneManager, this.loadingManager);
       this.cameraController = new CameraController(this.sceneManager);
