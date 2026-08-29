@@ -355,6 +355,48 @@ class ModelManager {
   _computeBounds() {
     this.boundingBox.setFromObject(this.root);
     this.boundingBox.getBoundingSphere(this.boundingSphere);
+
+    // The camera is framed once at load time and never re-zooms as scroll
+    // drives the explosion, so framing to the assembled cube alone let the
+    // outer cubelets fly past the edge of the canvas at high explode
+    // progress. Widen the framing sphere to also cover the fully-exploded
+    // extent (boundingBox/boundingSphere themselves stay assembled-only,
+    // since the ground shadow should reflect the cube at rest).
+    const explodedSphere = this._computeExplodedBoundingSphere();
+    this.boundingSphere = this._unionSpheres(this.boundingSphere, explodedSphere);
+  }
+
+  /** Measures the scene's bounding sphere with every cubelet moved to its
+   *  exploded position, then restores the assembled layout. */
+  _computeExplodedBoundingSphere() {
+    for (const part of this.parts.values()) {
+      part.object3D.position.copy(part.explodedPos);
+    }
+    this.root.updateMatrixWorld(true);
+
+    const explodedBox = new THREE.Box3().setFromObject(this.root);
+    const explodedSphere = new THREE.Sphere();
+    explodedBox.getBoundingSphere(explodedSphere);
+
+    for (const part of this.parts.values()) {
+      part.object3D.position.copy(part.basePos);
+    }
+    this.root.updateMatrixWorld(true);
+
+    return explodedSphere;
+  }
+
+  /** Smallest sphere that contains both input spheres. */
+  _unionSpheres(a, b) {
+    const centerDist = a.center.distanceTo(b.center);
+    if (centerDist + b.radius <= a.radius) return a.clone();
+    if (centerDist + a.radius <= b.radius) return b.clone();
+
+    const radius = (a.radius + b.radius + centerDist) / 2;
+    const center = centerDist > 1e-6
+      ? a.center.clone().lerp(b.center, (radius - a.radius) / centerDist)
+      : a.center.clone();
+    return new THREE.Sphere(center, radius);
   }
 
   getParts() {
@@ -410,9 +452,12 @@ class CameraController {
   frameToSphere(sphere) {
     const fovRad = (this.camera.fov * Math.PI) / 180;
     const fitDist = (sphere.radius * 1.65) / Math.sin(fovRad / 2);
-    this.radius = this.targetRadius = Utils.clamp(fitDist, 4, 18);
     this.minRadius = Math.max(2.5, sphere.radius * 1.15);
     this.maxRadius = sphere.radius * 6;
+    // Upper bound follows maxRadius (not a fixed constant) so a sphere sized
+    // to cover the fully-exploded cube — larger than the assembled one this
+    // was originally tuned against — isn't clamped back down and clipped.
+    this.radius = this.targetRadius = Utils.clamp(fitDist, 4, this.maxRadius);
     this.target.copy(sphere.center);
 
     this._defaults = {
