@@ -417,34 +417,30 @@ class AnimationManager {
 
 /* ==========================================================================
    ScrollController
-   Converts window scroll position within the pinned viewer section into a
-   deterministic target progress value, then the caller smooths toward it.
+   Converts the whole page's scroll position into a deterministic target
+   progress value (0 at the top of the page, 1 at the bottom), then the
+   caller smooths toward it. The 3D panel itself is fixed and independent
+   of scroll — only the explode/reassemble progress is driven by it.
    Progress is always derived from scrollY -> no drift, exact restoration.
    ========================================================================== */
 class ScrollController {
-  constructor(sectionEl) {
-    this.sectionEl = sectionEl;
+  constructor() {
     this.currentProgress = 0;
     this.targetProgress = 0;
     this.smoothing = 9; // higher = snappier response to scroll
-    this._lastScrollY = window.scrollY;
-    this._velocity = 0;
 
     this._onScroll = this._onScroll.bind(this);
+    this._onResize = this._onScroll.bind(this);
     window.addEventListener('scroll', this._onScroll, { passive: true });
+    window.addEventListener('resize', this._onResize);
     this._onScroll();
   }
 
   _onScroll() {
-    const rect = this.sectionEl.getBoundingClientRect();
-    const scrollableHeight = this.sectionEl.offsetHeight - window.innerHeight;
-    const scrolled = -rect.top;
-    const raw = scrollableHeight > 0 ? scrolled / scrollableHeight : 0;
+    const doc = document.documentElement;
+    const scrollableHeight = doc.scrollHeight - window.innerHeight;
+    const raw = scrollableHeight > 0 ? window.scrollY / scrollableHeight : 0;
     this.targetProgress = Utils.clamp(raw, 0, 1);
-
-    const now = window.scrollY;
-    this._velocity = now - this._lastScrollY;
-    this._lastScrollY = now;
   }
 
   update(dt) {
@@ -455,26 +451,18 @@ class ScrollController {
     return this.currentProgress;
   }
 
-  isInSection() {
-    const rect = this.sectionEl.getBoundingClientRect();
-    return rect.top <= window.innerHeight * 0.6 && rect.bottom >= window.innerHeight * 0.4;
-  }
-
   scrollToStart() {
-    const top = this.sectionEl.offsetTop;
-    window.scrollTo({ top, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 }
 
 /* ==========================================================================
    InteractionController
-   Desktop: mouse-drag anywhere on the canvas free-orbits the camera; wheel
-   scroll is left untouched so it drives normal page scroll (-> explosion).
-   Mobile: gesture direction is detected on touchmove — a horizontal-dominant
-   drag rotates the model (preventDefault, page does not scroll); a
-   vertical-dominant drag is treated as a page scroll (never prevented, so
-   native scrolling — and therefore the explosion timeline — is never
-   blocked). Two-finger pinch always zooms.
+   The 3D panel is a fixed side panel (not part of the scrollable flow), so
+   rotation and page scroll never compete for the same gesture: dragging on
+   the canvas always rotates, at any time, regardless of scroll position.
+   Page scroll (which drives the explode/reassemble timeline) happens
+   normally anywhere outside the panel. Two-finger pinch zooms.
    ========================================================================== */
 class InteractionController {
   constructor(canvas, cameraController) {
@@ -485,9 +473,6 @@ class InteractionController {
     this._lastX = 0;
     this._lastY = 0;
 
-    this._touchGesture = null; // 'rotate' | 'scroll' | null
-    this._touchStartX = 0;
-    this._touchStartY = 0;
     this._pinchStartDist = 0;
     this._pinchStartRadius = 0;
 
@@ -495,9 +480,9 @@ class InteractionController {
   }
 
   _bind() {
-    // Desktop mouse drag
+    // Pointer drag (mouse + touch alike) — always rotates, any time.
     this.canvas.addEventListener('pointerdown', (e) => {
-      if (e.pointerType === 'touch') return; // touch handled separately below
+      if (e.pointerType === 'touch' && this._activeTouches() >= 2) return; // let pinch handle it
       this._dragging = true;
       this._lastX = e.clientX;
       this._lastY = e.clientY;
@@ -514,41 +499,41 @@ class InteractionController {
     window.addEventListener('pointerup', () => { this._dragging = false; });
     window.addEventListener('pointercancel', () => { this._dragging = false; });
 
-    // Desktop trackpad pinch (reported as wheel + ctrlKey) / ctrl|shift+wheel = zoom
+    // Trackpad pinch (wheel + ctrlKey) / ctrl|shift+wheel = zoom the model.
+    // The panel is fixed, so normal wheel scroll here still bubbles to move
+    // the page (and therefore the explode timeline) — only modified wheel
+    // events are captured for zoom.
     this.canvas.addEventListener('wheel', (e) => {
       if (e.ctrlKey || e.metaKey || e.shiftKey) {
         e.preventDefault();
         const factor = 1 + e.deltaY * 0.0025;
         this.cameraController.zoomBy(factor);
       }
-      // otherwise: do nothing special, let the event bubble as normal page scroll
     }, { passive: false });
 
-    // Mobile touch: gesture-gated rotate vs scroll, plus pinch zoom
+    // Touch: always rotate with one finger, pinch-zoom with two.
     this.canvas.addEventListener('touchstart', (e) => this._onTouchStart(e), { passive: true });
     this.canvas.addEventListener('touchmove', (e) => this._onTouchMove(e), { passive: false });
     this.canvas.addEventListener('touchend', () => this._onTouchEnd());
     this.canvas.addEventListener('touchcancel', () => this._onTouchEnd());
   }
 
+  _activeTouches() {
+    return this._touchCount || 0;
+  }
+
   _onTouchStart(e) {
+    this._touchCount = e.touches.length;
     if (e.touches.length === 2) {
-      this._touchGesture = 'pinch';
+      this._dragging = false;
       this._pinchStartDist = this._touchDistance(e.touches);
       this._pinchStartRadius = this.cameraController.targetRadius;
-      return;
-    }
-    if (e.touches.length === 1) {
-      this._touchGesture = null; // undecided until movement crosses threshold
-      this._touchStartX = e.touches[0].clientX;
-      this._touchStartY = e.touches[0].clientY;
-      this._lastX = e.touches[0].clientX;
-      this._lastY = e.touches[0].clientY;
     }
   }
 
   _onTouchMove(e) {
-    if (this._touchGesture === 'pinch' && e.touches.length === 2) {
+    this._touchCount = e.touches.length;
+    if (e.touches.length === 2) {
       e.preventDefault();
       const dist = this._touchDistance(e.touches);
       const factor = this._pinchStartDist / Math.max(dist, 1);
@@ -557,37 +542,13 @@ class InteractionController {
         this.cameraController.minRadius,
         this.cameraController.maxRadius
       );
-      return;
     }
-
-    if (e.touches.length !== 1) return;
-    const x = e.touches[0].clientX;
-    const y = e.touches[0].clientY;
-
-    if (this._touchGesture === null) {
-      const dx = x - this._touchStartX;
-      const dy = y - this._touchStartY;
-      if (Math.hypot(dx, dy) < 9) return; // below threshold, keep undecided
-      this._touchGesture = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'rotate' : 'scroll';
-      this.canvas.classList.toggle('rotating', this._touchGesture === 'rotate');
-    }
-
-    if (this._touchGesture === 'rotate') {
-      e.preventDefault(); // consume the gesture: rotate only, no page scroll
-      const dx = x - this._lastX;
-      const dy = y - this._lastY;
-      this.cameraController.rotateBy(dx, dy, 0.009);
-    }
-    // gesture === 'scroll': do not preventDefault -> native page scroll proceeds
-    // uninterrupted, which is what drives the explosion timeline.
-
-    this._lastX = x;
-    this._lastY = y;
+    // single-finger drag is already handled via pointermove above; the
+    // panel is fixed so it never needs to release the gesture to the page.
   }
 
   _onTouchEnd() {
-    this._touchGesture = null;
-    this.canvas.classList.remove('rotating');
+    this._touchCount = 0;
   }
 
   _touchDistance(touches) {
@@ -612,7 +573,6 @@ class UIManager {
     this.progressDot = document.getElementById('progress-dot');
     this.progressPercent = document.getElementById('progress-percent');
     this.instructions = document.getElementById('instructions');
-    this.scrollCue = document.getElementById('scroll-cue');
 
     this._bindButtons();
     this._bindReveals();
@@ -670,8 +630,6 @@ class UIManager {
       this._instructionsFaded = false;
       this.instructions.classList.remove('faded');
     }
-
-    this.scrollCue.classList.toggle('hidden', progress > 0.03);
   }
 
   showError(message) {
@@ -707,7 +665,6 @@ class ResponsiveManager {
 class App {
   constructor() {
     this.canvas = document.getElementById('viewer-canvas');
-    this.viewerSection = document.getElementById('viewer-section');
     this.loadingManager = new LoadingManager();
     this.sceneManager = new SceneManager(this.canvas);
   }
@@ -723,7 +680,7 @@ class App {
 
       this.cameraController.frameToSphere(this.modelManager.boundingSphere);
       this.animationManager = new AnimationManager(this.modelManager);
-      this.scrollController = new ScrollController(this.viewerSection);
+      this.scrollController = new ScrollController();
       this.interactionController = new InteractionController(this.canvas, this.cameraController);
 
       this.uiManager = new UIManager({
