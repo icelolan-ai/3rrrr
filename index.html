@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>RUBRIC — Interactive 3D Explosion Experience</title>
-<meta name="description" content="An interactive scroll-driven 3D presentation featuring a Rubik's cube and a Ghost Cube — drag to rotate any time, scroll to explode." />
+<meta name="description" content="An interactive scroll-driven 3D presentation featuring a Ghost Cube and a 3x3x3 Rubik's cube, with the underlying physics of each — drag to rotate any time, scroll to explode." />
 <meta name="theme-color" content="#0a0a0c" />
 <script>
   (function () {
@@ -15,7 +15,8 @@
     } catch (e) {}
   })();
 </script>
-<link rel="stylesheet" href="./style.css?v=5" />
+<link rel="stylesheet" href="./style.css?v=6" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
 </head>
 <body>
 
@@ -64,10 +65,9 @@
   <nav id="site-menu" class="site-menu" aria-hidden="true">
     <div class="site-menu-inner">
       <ol class="site-menu-links">
-        <li><a href="#hero" class="site-menu-link" data-menu-link><span class="site-menu-index">01</span>Rubik's Cube</a></li>
-        <li><a href="#details-section" class="site-menu-link" data-menu-link><span class="site-menu-index">02</span>Details</a></li>
-        <li><a href="#ghost-hero" class="site-menu-link" data-menu-link><span class="site-menu-index">03</span>Ghost Cube</a></li>
-        <li><a href="#deploy-section" class="site-menu-link" data-menu-link><span class="site-menu-index">04</span>Deploy</a></li>
+        <li><a href="#ghost-hero" class="site-menu-link" data-menu-link><span class="site-menu-index">01</span>Ghost Cube</a></li>
+        <li><a href="#hero" class="site-menu-link" data-menu-link><span class="site-menu-index">02</span>Rubik's Cube</a></li>
+        <li><a href="#deploy-section" class="site-menu-link" data-menu-link><span class="site-menu-index">03</span>Deploy</a></li>
       </ol>
 
       <div class="site-menu-settings">
@@ -80,63 +80,61 @@
     </div>
   </nav>
 
-  <!-- ============ SHOWCASE 1: RUBIK'S CUBE ============ -->
-  <section class="showcase" id="rubik-showcase">
+  <!-- ============ SHOWCASE 1: GHOST CUBE ============ -->
+  <section class="showcase" id="ghost-showcase">
 
     <main class="content-col">
 
       <!-- HERO -->
-      <section class="hero" id="hero">
-        <p class="eyebrow">Interactive 3D Product Presentation</p>
-        <h1 class="hero-title">แยกชิ้นส่วน<br><span class="hero-title-accent">ทีละมิติ</span></h1>
-        <p class="hero-sub">โมเดล 3D อยู่ทางขวาตลอดเวลา ลากหรือคลิกที่โมเดลเพื่อหมุนดูได้ทุกเมื่อ — เลื่อนหน้าจอลงเพื่อค่อยๆ ระเบิดลูกบาศก์รูบิกสีแดงเมทัลลิกออกเป็นชิ้นส่วน แล้วเลื่อนขึ้นเพื่อประกอบกลับคืน</p>
-
-        <div class="hero-stats">
-          <div class="hero-stat-cell reveal">
-            <span class="stat-num">27</span>
-            <span class="stat-label">ชิ้นส่วนคิวเล็ต<br>เคลื่อนไหวอิสระ</span>
-          </div>
-          <div class="hero-stat-cell reveal">
-            <span class="stat-num">0–100%</span>
-            <span class="stat-label">Scroll-Driven<br>Progress Timeline</span>
-          </div>
-        </div>
+      <section class="hero reveal" id="ghost-hero">
+        <p class="eyebrow">Physics-Driven 3D Puzzle</p>
+        <h1 class="hero-title">Ghost Cube</h1>
+        <p class="hero-sub">Drag or click the model to orbit it any time — scroll down to explode it apart piece by piece, scroll back up to reassemble it.</p>
       </section>
 
-      <!-- DETAILS / BENTO FEATURE GRID -->
-      <section id="details-section" class="details-section">
+      <!-- PHYSICS DEEP-DIVE -->
+      <section class="physics-section">
         <div class="section-head reveal">
-          <p class="eyebrow">How it works</p>
-          <h2>สถาปัตยกรรมของประสบการณ์</h2>
+          <p class="eyebrow">The Mechanics</p>
+          <h2>The Physics Mechanics of the Ghost Cube</h2>
+        </div>
+        <p class="physics-intro reveal">A modified cubic puzzle utilizing an internal 3x3x3 core with slanted and offset cutting planes, the Ghost Cube is more complex than a standard Rubik's cube due to its geometric asymmetry, mass distribution, and uneven pressure. The relevant physics principles and formulas are as follows:</p>
+
+        <div class="physics-block reveal">
+          <h3>1. Rotational Dynamics &amp; Center of Mass Offset</h3>
+          <p>Although the internal structure uses a 3x3x3 core, the asymmetrical piece cuts cause the Center of Mass (CM) of individual pieces and layers to shift out of alignment with the axis of rotation.</p>
+          <p><strong>Position of the center of mass for a rotating layer ($R_{cm}$):</strong></p>
+          <div class="formula">$$R_{cm} = \frac{1}{M} \sum_{i=1}^{n} m_i r_i$$</div>
+          <p>Where $m_i$ is the mass of each sub-piece, and $r_i$ is the position vector from the rotation axis. Because $R_{cm}$ does not lie on the axis of rotation, an unbalanced torque is generated, requiring the player to apply varying amounts of torque ($\tau$) at different angles of rotation.</p>
+          <p><strong>Complex Moment of Inertia ($I$):</strong></p>
+          <p>Due to the variety and overlap of piece shapes, the total moment of inertia changes dynamically with the rotation angle ($\theta$), resulting in uneven rotational resistance.</p>
         </div>
 
-        <div class="bento-grid">
-          <div class="bento-card bento-wide reveal">
-            <h3>True Object Interpolation</h3>
-            <p>ทั้ง 27 คิวเล็ตถูกจับคู่แบบ node-to-node ระหว่างโมเดลปกติและโมเดลระเบิด ตำแหน่งเริ่ม/ปลายถูกอ่านจาก keyframe จริงในไฟล์ GLB แล้ว interpolate ด้วยเวกเตอร์ — ไม่ใช่การสลับโมเดล</p>
-          </div>
-          <div class="bento-card reveal">
-            <h3>Scroll = Timeline</h3>
-            <p>ตำแหน่ง scroll ของแต่ละโมเดลถูกแปลงเป็นค่า progress 0.0–1.0 แบบ deterministic กลับไปตำแหน่งเดิมได้เป๊ะทุกครั้ง</p>
-          </div>
-          <div class="bento-card reveal">
-            <h3>Rotate Anytime</h3>
-            <p>แผงโมเดล 3D ตรึงอยู่ทางขวาตลอดช่วงที่ส่วนนั้นอยู่ในจอ ลากหรือคลิกหมุนได้ตลอดเวลาโดยไม่ขัดกับการเลื่อนหน้าเว็บฝั่งซ้าย</p>
-          </div>
-          <div class="bento-card reveal">
-            <h3>PBR Metallic Lighting</h3>
-            <p>ใช้ physically-based rendering พร้อม environment lighting แบบ procedural เพื่อคงลุคแดงเมทัลลิกมันวาว</p>
-          </div>
-          <div class="bento-card bento-wide reveal">
-            <h3>Modular & Extensible</h3>
-            <p>แยกเป็น SceneManager, ModelManager, AnimationManager, ScrollController, InteractionController, CameraController, LightingManager, UIManager — แต่ละโมเดลรันเป็น Experience อิสระของตัวเอง พร้อมต่อยอดโมเดลเพิ่มเติมในอนาคต</p>
-          </div>
+        <div class="physics-block reveal">
+          <h3>2. Contact Pressure &amp; Tribology</h3>
+          <p>The contact surfaces of a Ghost Cube are not flat planes like a standard Rubik's cube; instead, they feature stepped and slanted cuts, leading to an uneven pressure distribution across contact areas.</p>
+          <p><strong>Contact Pressure ($P$):</strong></p>
+          <div class="formula">$$P = \frac{F_N}{A_{eff}}$$</div>
+          <p>Where $F_N$ is the normal force and $A_{eff}$ is the effective contact area. Because certain pieces have very narrow contact areas ($A_{eff}$), pressure ($P$) spikes significantly in specific spots.</p>
+          <p><strong>Local Frictional Force ($F_f$):</strong></p>
+          <div class="formula">$$F_f = \mu P A_{eff}$$</div>
+          <p>High pressure in narrow regions causes high local static friction, leading to a higher tendency for "binding" or lock-up compared to standard cubes if forced off-axis.</p>
+        </div>
+
+        <div class="physics-block reveal">
+          <h3>3. Elasticity &amp; Mechanical Interference</h3>
+          <p>A defining characteristic of the Ghost Cube is that in its "solved" state, the pieces remain offset and misaligned. This makes the mechanism heavily reliant on the core spring's elasticity.</p>
+          <p><strong>Hooke's Law &amp; Potential Energy Storage ($U$):</strong> when twisting offset layers, wedge-shaped pieces push against each other perpendicularly, causing the core to expand and forcing the springs to stretch by a distance $x$.</p>
+          <div class="formula">$$F_{spring} = -kx, \quad U = \frac{1}{2}kx^2$$</div>
+          <p>Where $k$ is the spring constant. This elastic potential energy acts as a dampening snap-back force to guide pieces back into alignment as they approach correct positions.</p>
+          <p><strong>Mechanical Interference Condition:</strong></p>
+          <p>Piece movement occurs only when the applied torque overcomes collision forces between material surfaces and spring tension. The bevel angle ($\theta_b$) of the pieces must correspond to the depth of the cut to prevent permanent mechanical lock-ups during rotation.</p>
         </div>
       </section>
 
     </main>
 
-    <!-- ============ RIGHT: STICKY 3D VIEWER PANEL (RUBIK) ============ -->
+    <!-- ============ RIGHT: STICKY 3D VIEWER PANEL (GHOST CUBE) ============ -->
     <aside class="viewer-panel">
       <canvas class="viewer-canvas"></canvas>
 
@@ -183,51 +181,64 @@
 
   </section>
 
-  <!-- ============ SHOWCASE 2: GHOST CUBE ============ -->
-  <section class="showcase" id="ghost-showcase">
+  <!-- ============ SHOWCASE 2: RUBIK'S CUBE (3x3x3) ============ -->
+  <section class="showcase" id="rubik-showcase">
 
     <main class="content-col">
 
       <!-- HERO -->
-      <section class="hero" id="ghost-hero">
-        <p class="eyebrow">Interactive 3D Product Presentation</p>
-        <h1 class="hero-title">โกสต์คิวบ์<br><span class="hero-title-accent">พื้นผิวเฉียงมุม</span></h1>
-        <p class="hero-sub">Ghost Cube ปริศนาทรงเหลี่ยมเฉียงสีเหล็กน้ำเงิน ลากหรือคลิกที่โมเดลเพื่อหมุนดูได้ทุกเมื่อ — เลื่อนหน้าจอลงเพื่อค่อยๆ ระเบิดชิ้นส่วนออก แล้วเลื่อนขึ้นเพื่อประกอบกลับคืนเหมือนเดิม</p>
-
-        <div class="hero-stats">
-          <div class="hero-stat-cell reveal">
-            <span class="stat-num">26</span>
-            <span class="stat-label">ชิ้นส่วนโกสต์พีซ<br>เคลื่อนไหวอิสระ</span>
-          </div>
-          <div class="hero-stat-cell reveal">
-            <span class="stat-num">0–100%</span>
-            <span class="stat-label">Scroll-Driven<br>Progress Timeline</span>
-          </div>
-        </div>
+      <section class="hero reveal" id="hero">
+        <p class="eyebrow">Physics-Driven 3D Puzzle</p>
+        <h1 class="hero-title">Rubik's Cube<br><span class="hero-title-accent">(3x3x3)</span></h1>
+        <p class="hero-sub">Drag or click the model to orbit it any time — scroll down to explode the metallic red cube apart piece by piece, scroll back up to reassemble it.</p>
       </section>
 
-      <!-- DETAILS -->
-      <section class="details-section">
+      <!-- PHYSICS DEEP-DIVE -->
+      <section class="physics-section">
         <div class="section-head reveal">
-          <p class="eyebrow">About this model</p>
-          <h2>โมเดลไฟล์เดียว หลายอนิเมชัน</h2>
+          <p class="eyebrow">The Mechanics</p>
+          <h2>The Physics Mechanics of the 3x3x3 Rubik's Cube</h2>
+        </div>
+        <p class="physics-intro reveal">Involves several branches of physics, including rotational dynamics, friction and tribology, lubricant fluid dynamics, and material elasticity. The relevant details and formulas are as follows:</p>
+
+        <div class="physics-block reveal">
+          <h3>1. Rotational Dynamics</h3>
+          <p>Twisting a layer of the cube involves rotating an object in 3D space, governed by torque, moment of inertia, and angular acceleration.</p>
+          <p><strong>Torque ($\tau$):</strong> the rotational force applied by the player to turn a layer around an axis.</p>
+          <div class="formula">$$\tau = r \times F = I\alpha$$</div>
+          <p>Where $r$ is the distance from the pivot point (core), $F$ is the applied force, $I$ is the moment of inertia, and $\alpha$ is the angular acceleration.</p>
+          <p><strong>Moment of Inertia ($I$):</strong> since a Rubik's cube consists of multiple sub-pieces (edges, corners, centers) with distributed mass, the total moment of inertia is the sum of the mass of each piece multiplied by the square of its distance from the axis of rotation.</p>
+          <div class="formula">$$I = \sum m_i r_i^2$$</div>
         </div>
 
-        <div class="bento-grid">
-          <div class="bento-card bento-wide reveal">
-            <h3>Single-File, Multi-Clip Explode</h3>
-            <p>ต่างจากรูบิกที่ใช้ไฟล์ GLB สองไฟล์ (ปกติ + ระเบิด) โกสต์คิวบ์เก็บทุกอย่างไว้ในไฟล์เดียว โดยแต่ละชิ้นมี animation clip ของตัวเองที่ไล่จากตำแหน่งประกอบไปยังตำแหน่งระเบิด — โค้ดอ่าน keyframe สุดท้ายของแต่ละ clip มาใช้เป็นเป้าหมายได้ทันที</p>
-          </div>
-          <div class="bento-card reveal">
-            <h3>Steel Blue PBR</h3>
-            <p>วัสดุผิวนอกสีเหล็กน้ำเงินความหยาบต่ำ คู่กับวัสดุด้านในสีดำเข้ม ให้ลุคมันวาวเหมือนโลหะเคลือบภายใต้แสงแวดล้อมแบบเดียวกับรูบิก</p>
-          </div>
+        <div class="physics-block reveal">
+          <h3>2. Friction &amp; Tribology</h3>
+          <p>Smooth turning performance depends on friction between ABS (Acrylonitrile Butadiene Styrene) plastic surfaces and lubricants.</p>
+          <p><strong>Frictional Force ($F_f$):</strong> the resistance encountered during movement between contact surfaces.</p>
+          <div class="formula">$$F_f = \mu N$$</div>
+          <p>Where $\mu$ is the coefficient of friction (reduced by lubricants) and $N$ is the normal reaction force between surfaces. Lubricants lower $\mu$ and bridge the gap between static friction ($\mu_s$) and kinetic friction ($\mu_k$), ensuring smooth turning and preventing stick-slip phenomena.</p>
+        </div>
+
+        <div class="physics-block reveal">
+          <h3>3. Elasticity &amp; Spring Tension</h3>
+          <p>Modern Rubik's cube cores feature screws and springs on all six central axes to control tension, flexibility, and stability.</p>
+          <p><strong>Hooke's Law:</strong> when turning the cube or when pieces push outward, the core springs stretch or compress proportionally to the applied force.</p>
+          <div class="formula">$$F = -kx$$</div>
+          <p>Where $F$ is the restoring force of the spring, $k$ is the spring constant, and $x$ is the displacement from equilibrium.</p>
+          <p><strong>Elastic Potential Energy ($U$):</strong> energy stored in the springs as pieces are pushed outward.</p>
+          <div class="formula">$$U = \frac{1}{2}kx^2$$</div>
+        </div>
+
+        <div class="physics-block reveal">
+          <h3>4. Corner Cutting Dynamics</h3>
+          <p>The ability to turn a layer even when the faces are not 100% aligned is driven by repulsive forces between the bevel edges of corner and edge pieces.</p>
+          <p>When pieces collide, the diagonal force vectors resolve into perpendicular components that overcome spring tension ($F = -kx$), causing the core to expand slightly. This allows pieces to bypass alignment barriers via temporary elastic deformation of the plastic and springs.</p>
         </div>
       </section>
 
     </main>
 
-    <!-- ============ RIGHT: STICKY 3D VIEWER PANEL (GHOST CUBE) ============ -->
+    <!-- ============ RIGHT: STICKY 3D VIEWER PANEL (RUBIK) ============ -->
     <aside class="viewer-panel">
       <canvas class="viewer-canvas"></canvas>
 
@@ -289,6 +300,8 @@
     </footer>
   </main>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
   <script type="importmap">
   {
     "imports": {
@@ -298,6 +311,6 @@
     }
   }
   </script>
-  <script type="module" src="./script.js?v=5"></script>
+  <script type="module" src="./script.js?v=6"></script>
 </body>
 </html>

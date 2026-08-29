@@ -43,6 +43,15 @@ const Utils = {
 //                 the same file is displayed AND mined for explode targets.
 const EXPERIENCE_CONFIGS = [
   {
+    sectionId: 'ghost-showcase',
+    rootName: 'GhostRoot',
+    mode: 'single',
+    paths: {
+      single: './models/ghost_cube_steel_blue.glb',
+    },
+    loadingKeys: { single: 'ghost' },
+  },
+  {
     sectionId: 'rubik-showcase',
     rootName: 'RubikRoot',
     mode: 'dual',
@@ -51,15 +60,6 @@ const EXPERIENCE_CONFIGS = [
       exploded: './models/rubric3x3x3_red_explode.glb',
     },
     loadingKeys: { normal: 'rubik-normal', exploded: 'rubik-exploded' },
-  },
-  {
-    sectionId: 'ghost-showcase',
-    rootName: 'GhostRoot',
-    mode: 'single',
-    paths: {
-      single: './models/ghost_cube_steel_blue.glb',
-    },
-    loadingKeys: { single: 'ghost' },
   },
 ];
 
@@ -874,9 +874,24 @@ class PanelUIManager {
    ========================================================================== */
 class GlobalChrome {
   constructor() {
+    this._renderMath();
     this._bindMenu();
     this._bindReveals();
     document.getElementById('error-retry-btn').addEventListener('click', () => window.location.reload());
+  }
+
+  /** Renders the $...$ / $$...$$ LaTeX in the physics copy via KaTeX
+   *  (loaded from a CDN in index.html). Guarded so a blocked/slow CDN
+   *  degrades to plain-text formulas instead of a hard failure. */
+  _renderMath() {
+    if (typeof window.renderMathInElement !== 'function') return;
+    window.renderMathInElement(document.body, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '$', right: '$', display: false },
+      ],
+      throwOnError: false,
+    });
   }
 
   _bindMenu() {
