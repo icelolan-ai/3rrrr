@@ -77,10 +77,15 @@ class SceneManager {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
-      alpha: false,
+      alpha: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.setClearColor(0x0a0a0c, 1);
+    // Transparent clear color: the canvas is drawn wider than the viewer
+    // panel (see --viewer-bleed in CSS) so the cube can visually spill past
+    // the panel's left edge onto the content column. Only the cube/shadow
+    // pixels should be opaque there — everywhere else must stay see-through
+    // to the panel background (inside the panel) or the page (past its edge).
+    this.renderer.setClearColor(0x000000, 0);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -169,9 +174,30 @@ class LightingManager {
     return this.envEnabled;
   }
 
+  /** A radial gradient (opaque center -> transparent edge) used to fade the
+   *  ground shadow out softly, instead of letting it hard-clip against the
+   *  edge of the (bleeding, transparent) canvas. */
+  _getShadowFadeTexture() {
+    if (this._shadowFadeTexture) return this._shadowFadeTexture;
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.35, 'rgba(255,255,255,0.7)');
+    gradient.addColorStop(0.75, 'rgba(255,255,255,0.15)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    this._shadowFadeTexture = new THREE.CanvasTexture(canvas);
+    return this._shadowFadeTexture;
+  }
+
   /** Adds a shadow-only ground plane beneath the model so the cube casts a
    *  soft contact shadow, sized/positioned from the model's bounding box and
-   *  matched to the key light's shadow-camera frustum. */
+   *  matched to the key light's shadow-camera frustum. Faded radially so it
+   *  never hard-clips against the canvas edge. */
   addGroundShadow(boundingBox) {
     const size = new THREE.Vector3();
     boundingBox.getSize(size);
@@ -179,7 +205,10 @@ class LightingManager {
     boundingBox.getCenter(center);
 
     const footprint = Math.max(size.x, size.z, 0.001) * 0.5;
-    const planeSize = footprint * 10;
+    // Kept close to the cube's own footprint (rather than a large "infinite
+    // ground") so the faded edge always resolves well inside the canvas,
+    // even when the camera orbits to a grazing angle.
+    const planeSize = footprint * 3;
 
     const shadowCam = this.keyLight.shadow.camera;
     shadowCam.left = -footprint * 3;
@@ -191,7 +220,9 @@ class LightingManager {
     shadowCam.updateProjectionMatrix();
 
     const geometry = new THREE.PlaneGeometry(planeSize, planeSize);
-    const material = new THREE.ShadowMaterial({ opacity: 0.4 });
+    const material = new THREE.ShadowMaterial({ opacity: 0.45 });
+    material.alphaMap = this._getShadowFadeTexture();
+    material.transparent = true;
     const plane = new THREE.Mesh(geometry, material);
     plane.rotation.x = -Math.PI / 2;
     plane.position.set(center.x, boundingBox.min.y - size.y * 0.02, center.z);
@@ -655,13 +686,12 @@ class InteractionController {
    light theme. The <html data-theme="light"> attribute (applied instantly
    by an inline script in <head> to avoid flash-of-wrong-theme) drives all
    the CSS custom properties; this class just wires up the button and keeps
-   the WebGL canvas clear color / meta theme-color in sync.
+   the meta theme-color in sync. The canvas itself stays transparent in both
+   themes (see SceneManager), so it needs no per-theme clear color.
    ========================================================================== */
 class ThemeManager {
-  constructor(sceneManager) {
-    this.sceneManager = sceneManager;
+  constructor() {
     this.storageKey = 'rubric3d-theme';
-    this.clearColors = { dark: 0x0a0a0c, light: 0xffffff };
     this.metaColors = { dark: '#0a0a0c', light: '#ffffff' };
 
     this.btn = document.getElementById('theme-toggle-btn');
@@ -689,7 +719,6 @@ class ThemeManager {
     this.btn?.setAttribute('aria-pressed', String(theme === 'light'));
     if (this.icon) this.icon.textContent = theme === 'light' ? '◑' : '◐';
     if (this.metaThemeColor) this.metaThemeColor.setAttribute('content', this.metaColors[theme]);
-    this.sceneManager.renderer.setClearColor(this.clearColors[theme], 1);
   }
 }
 
@@ -837,7 +866,7 @@ class App {
     this.canvas = document.getElementById('viewer-canvas');
     this.loadingManager = new LoadingManager();
     this.sceneManager = new SceneManager(this.canvas);
-    this.themeManager = new ThemeManager(this.sceneManager);
+    this.themeManager = new ThemeManager();
   }
 
   async init() {
