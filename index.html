@@ -40,11 +40,30 @@
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-text">RUBRIC<span class="brand-accent">.3D</span></span>
     </div>
-    <nav class="site-nav">
-      <a href="#details-section">Details</a>
-      <a href="#deploy-section">Deploy</a>
-    </nav>
+    <button id="menu-toggle-btn" class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-menu">
+      <span class="menu-toggle-label" data-open-label="MENU" data-close-label="CLOSE">MENU</span>
+      <span class="menu-toggle-burger" aria-hidden="true"><i></i><i></i></span>
+    </button>
   </header>
+
+  <!-- ============ FULL-SCREEN MENU OVERLAY ============ -->
+  <nav id="site-menu" class="site-menu" aria-hidden="true">
+    <div class="site-menu-inner">
+      <ol class="site-menu-links">
+        <li><a href="#hero" class="site-menu-link" data-menu-link><span class="site-menu-index">01</span>Home</a></li>
+        <li><a href="#details-section" class="site-menu-link" data-menu-link><span class="site-menu-index">02</span>Details</a></li>
+        <li><a href="#deploy-section" class="site-menu-link" data-menu-link><span class="site-menu-index">03</span>Deploy</a></li>
+      </ol>
+
+      <div class="site-menu-settings">
+        <p class="site-menu-settings-label">แสดงผลบนแผงโมเดล</p>
+        <button id="progress-toggle-btn" class="menu-switch" type="button" aria-pressed="true">
+          <span>แถบความคืบหน้า (Exploded)</span>
+          <span class="menu-switch-track" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
+        </button>
+      </div>
+    </div>
+  </nav>
 
   <div class="layout">
 
@@ -126,9 +145,19 @@
             <span class="instr-sep">/</span>
             <span class="instr-item"><span class="instr-key">SCROLL</span> = ระเบิดชิ้นส่วน</span>
           </div>
-          <button id="reset-btn" class="btn btn-ghost reset-btn" type="button" aria-label="รีเซ็ตมุมมองทั้งหมด">
-            <span class="reset-icon" aria-hidden="true">↺</span> RESET
-          </button>
+
+          <div class="tools-cluster">
+            <div id="tools-tray" class="tools-tray">
+              <button id="reset-btn" class="btn btn-ghost reset-btn" type="button" aria-label="รีเซ็ตมุมมองทั้งหมด">
+                <span class="reset-icon" aria-hidden="true">↺</span> RESET
+              </button>
+              <button id="env-btn" class="btn btn-icon" type="button" title="สลับแสงแวดล้อม" aria-pressed="true">☀</button>
+              <button id="fullscreen-btn" class="btn btn-icon" type="button" title="เต็มจอ">⛶</button>
+            </div>
+            <button id="tools-toggle-btn" class="btn btn-icon tools-toggle" type="button" title="เครื่องมือ" aria-expanded="false" aria-controls="tools-tray">
+              <span class="tools-toggle-icon" aria-hidden="true">⋯</span>
+            </button>
+          </div>
         </div>
 
         <div class="hud-bottom">
@@ -144,11 +173,10 @@
 
           <div class="qol-controls">
             <button id="autorotate-btn" class="btn btn-icon" type="button" title="สลับหมุนอัตโนมัติ" aria-pressed="false">⟳</button>
-            <button id="env-btn" class="btn btn-icon" type="button" title="สลับแสงแวดล้อม" aria-pressed="true">☀</button>
-            <button id="fullscreen-btn" class="btn btn-icon" type="button" title="เต็มจอ">⛶</button>
           </div>
         </div>
       </div>
+
     </aside>
 
   </div>
