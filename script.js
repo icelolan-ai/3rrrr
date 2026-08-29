@@ -300,14 +300,11 @@ class ModelManager {
     this.boundingBox.setFromObject(this.root);
     this.boundingBox.getBoundingSphere(this.boundingSphere);
 
-    // The camera is framed once at load time and never re-zooms as scroll
-    // drives the explosion, so framing to the assembled cube alone let the
-    // outer cubelets fly past the edge of the canvas at high explode
-    // progress. Widen the framing sphere to also cover the fully-exploded
-    // extent (boundingBox/boundingSphere themselves stay assembled-only,
-    // since the ground shadow should reflect the cube at rest).
-    const explodedSphere = this._computeExplodedBoundingSphere();
-    this.boundingSphere = this._unionSpheres(this.boundingSphere, explodedSphere);
+    // Kept separate from the assembled sphere (rather than merged into one
+    // "covers everything" sphere) so CameraController can frame the resting
+    // cube tight — reads bigger — while still zooming out enough to cover
+    // the wider exploded spread as scroll progress increases.
+    this.explodedBoundingSphere = this._computeExplodedBoundingSphere();
   }
 
   /** Measures the scene's bounding sphere with every cubelet moved to its
@@ -328,19 +325,6 @@ class ModelManager {
     this.root.updateMatrixWorld(true);
 
     return explodedSphere;
-  }
-
-  /** Smallest sphere that contains both input spheres. */
-  _unionSpheres(a, b) {
-    const centerDist = a.center.distanceTo(b.center);
-    if (centerDist + b.radius <= a.radius) return a.clone();
-    if (centerDist + a.radius <= b.radius) return b.clone();
-
-    const radius = (a.radius + b.radius + centerDist) / 2;
-    const center = centerDist > 1e-6
-      ? a.center.clone().lerp(b.center, (radius - a.radius) / centerDist)
-      : a.center.clone();
-    return new THREE.Sphere(center, radius);
   }
 
   getParts() {
@@ -390,36 +374,42 @@ class CameraController {
     this.autoRotate = false;
     this.autoRotateSpeed = 0.12;
 
+    // Once the user manually zooms (pinch or ctrl/shift+wheel), the
+    // scroll-linked auto zoom (see setExplodeRadius) stops touching
+    // targetRadius, so it doesn't fight their input; reset() re-enables it.
+    this._userZoomed = false;
+
     this._defaults = null;
   }
 
-  frameToSphere(sphere) {
-    this._framedSphere = sphere; // remembered so reframe() can redo this after a resize
-
-    // PerspectiveCamera.fov is the VERTICAL field of view; the horizontal
-    // FOV depends on aspect and can be narrower (aspect < 1, a tall/narrow
-    // canvas like the viewer panel usually is). Fitting to vFOV alone
-    // under-shoots the needed distance whenever the horizontal fit is the
-    // tighter constraint, letting the sphere clip past the left/right
-    // edges even though it fits top-to-bottom — so fit to whichever axis
-    // is more restrictive.
+  /** Vertical FOV alone under-shoots the needed distance whenever the
+   *  horizontal FOV is the tighter constraint (aspect < 1, as the viewer
+   *  panel usually is) — fits to whichever of the two is more restrictive. */
+  _fitDistance(sphereRadius, margin) {
     const vFovRad = (this.camera.fov * Math.PI) / 180;
     const aspect = this.camera.aspect || 1;
     const hFovRad = 2 * Math.atan(Math.tan(vFovRad / 2) * aspect);
     const limitingFovRad = Math.min(vFovRad, hFovRad);
+    return (sphereRadius * margin) / Math.sin(limitingFovRad / 2);
+  }
 
-    // Margin above the exact "just fits" distance — kept modest (rather than
-    // the roomier 1.65 this used to be) so the cube reads bigger by default,
-    // while still comfortably covering the fully-exploded state this sphere
-    // is sized for.
-    const fitDist = (sphere.radius * 1.4) / Math.sin(limitingFovRad / 2);
-    this.minRadius = Math.max(2.5, sphere.radius * 1.15);
-    this.maxRadius = sphere.radius * 6;
-    // Upper bound follows maxRadius (not a fixed constant) so a sphere sized
-    // to cover the fully-exploded cube — larger than the assembled one this
-    // was originally tuned against — isn't clamped back down and clipped.
-    this.radius = this.targetRadius = Utils.clamp(fitDist, 4, this.maxRadius);
-    this.target.copy(sphere.center);
+  /** Frames the camera using two spheres: the assembled cube (tight margin,
+   *  so the resting view reads large) and the fully-exploded cube (a
+   *  generous margin, so no cubelet clips at the widest spread). The actual
+   *  distance is interpolated between the two every frame by
+   *  setExplodeRadius() as scroll progress changes. */
+  frameToRange(assembledSphere, explodedSphere) {
+    // remembered so reframe() can redo this after a resize/orientation change
+    this._framedAssembledSphere = assembledSphere;
+    this._framedExplodedSphere = explodedSphere;
+
+    this._assembledDist = this._fitDistance(assembledSphere.radius, 1.1);
+    this._explodedDist = this._fitDistance(explodedSphere.radius, 1.4);
+
+    this.minRadius = Math.max(2.5, assembledSphere.radius * 1.15);
+    this.maxRadius = explodedSphere.radius * 6;
+    this.radius = this.targetRadius = Utils.clamp(this._assembledDist, 4, this.maxRadius);
+    this.target.copy(assembledSphere.center);
 
     this._defaults = {
       theta: this.theta,
@@ -435,7 +425,23 @@ class CameraController {
    *  proportions change (window resize, or an iPad/phone rotating between
    *  portrait and landscape), since the required distance depends on it. */
   reframe() {
-    if (this._framedSphere) this.frameToSphere(this._framedSphere);
+    if (this._framedAssembledSphere && this._framedExplodedSphere) {
+      this.frameToRange(this._framedAssembledSphere, this._framedExplodedSphere);
+    }
+  }
+
+  /** Ties the camera's zoom to the current explode progress, so the
+   *  resting cube can be framed tight (large) while the fully-exploded
+   *  state still gets the extra distance it needs to avoid clipping.
+   *  No-ops once the user has taken manual control of zoom. */
+  setExplodeRadius(progress) {
+    if (this._userZoomed || this._assembledDist == null || this._explodedDist == null) return;
+    const eased = Utils.easeInOutCubic(progress);
+    this.targetRadius = Utils.lerp(this._assembledDist, this._explodedDist, eased);
+  }
+
+  markUserZoomed() {
+    this._userZoomed = true;
   }
 
   rotateBy(deltaThetaPx, deltaPhiPx, sensitivity = 0.006) {
@@ -458,6 +464,7 @@ class CameraController {
 
   zoomBy(factor) {
     this.targetRadius = Utils.clamp(this.targetRadius * factor, this.minRadius, this.maxRadius);
+    this.markUserZoomed();
   }
 
   setAutoRotate(enabled) {
@@ -472,6 +479,7 @@ class CameraController {
     this.velTheta = 0;
     this.velPhi = 0;
     this.cancelFling();
+    this._userZoomed = false; // resume scroll-linked auto zoom after a reset
   }
 
   update(dt) {
@@ -678,6 +686,7 @@ class InteractionController {
         this.cameraController.minRadius,
         this.cameraController.maxRadius
       );
+      this.cameraController.markUserZoomed();
     }
     // single-finger drag is already handled via pointermove above; the
     // panel is fixed so it never needs to release the gesture to the page.
@@ -896,7 +905,7 @@ class App {
 
       await this.modelManager.loadAll();
 
-      this.cameraController.frameToSphere(this.modelManager.boundingSphere);
+      this.cameraController.frameToRange(this.modelManager.boundingSphere, this.modelManager.explodedBoundingSphere);
       this.animationManager = new AnimationManager(this.modelManager);
       this.scrollController = new ScrollController();
       this.interactionController = new InteractionController(this.canvas, this.cameraController);
@@ -931,6 +940,7 @@ class App {
   _tick(dt) {
     const progress = this.scrollController.update(dt);
     this.animationManager.setProgress(progress);
+    this.cameraController.setExplodeRadius(progress);
     this.cameraController.update(dt);
     this.uiManager.updateProgressUI(progress);
 
