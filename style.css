@@ -246,7 +246,9 @@ button{ font-family:inherit; cursor:pointer; }
    Hero — text intro (left column)
    ========================================================================== */
 .hero{
-  padding:56px 0 40px;
+  /* horizontal padding matches .details-section below so both paragraphs
+     line up on the same left edge instead of the hero sitting flush left */
+  padding:56px clamp(20px,5vw,56px) 40px;
   display:flex; flex-direction:column; gap:24px;
 }
 .eyebrow{
