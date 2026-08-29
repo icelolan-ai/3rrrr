@@ -59,7 +59,13 @@
 
 *,*::before,*::after{ box-sizing:border-box; }
 html{ scroll-behavior:smooth; background:var(--bg); }
-html,body{ overflow-x:hidden; max-width:100%; }
+/* overflow-x:hidden on BOTH html and body (rather than just one) makes each
+   compute its own independent scroll container, which breaks position:sticky
+   inside body — sticky ends up anchored to body's own (never-moving)
+   scrollport instead of the real page scroll. Keep it on html only; body
+   just needs the width clamp. */
+html{ overflow-x:hidden; max-width:100%; }
+body{ max-width:100%; }
 
 body{
   margin:0;
@@ -232,9 +238,21 @@ button{ font-family:inherit; cursor:pointer; }
 }
 .hud > *{ pointer-events:auto; }
 
+/* ==========================================================================
+   Phase markers + the 3D-transition scroll runway — invisible spacers that
+   the JS reads (getBoundingClientRect) to split the single continuous
+   scroll into phases (Ghost -> transition -> Rubik text -> explode).
+   ========================================================================== */
+.phase-marker{ height:0; margin:0; padding:0; }
+.transition-space{ height:140vh; }
+.explode-space{ height:180vh; }
+.explode-cue{ padding-top:0; }
+
 @media (max-width:900px){
   :root{ --panel-w: 100vw; --panel-w-min: 0px; --viewer-bleed: 0px; }
   .showcase{ flex-direction:column; }
+  .transition-space{ height:80vh; }
+  .explode-space{ height:100vh; }
   /* the 3D panel reads above the text on mobile — reorder visually rather
      than in the DOM, so the sticky panel still pins/releases correctly
      against its own section's scroll range */

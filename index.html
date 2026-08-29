@@ -15,7 +15,7 @@
     } catch (e) {}
   })();
 </script>
-<link rel="stylesheet" href="./style.css?v=6" />
+<link rel="stylesheet" href="./style.css?v=7" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
 </head>
 <body>
@@ -80,8 +80,10 @@
     </div>
   </nav>
 
-  <!-- ============ SHOWCASE 1: GHOST CUBE ============ -->
-  <section class="showcase" id="ghost-showcase">
+  <!-- ============ MAIN SHOWCASE: one continuous scroll-driven journey
+       (Ghost Cube -> 3D transition -> Rubik's Cube -> explode), sharing a
+       single sticky 3D panel and Three.js scene for the whole page. ======= -->
+  <section class="showcase" id="main-showcase">
 
     <main class="content-col">
 
@@ -89,7 +91,7 @@
       <section class="hero reveal" id="ghost-hero">
         <p class="eyebrow">Physics-Driven 3D Puzzle</p>
         <h1 class="hero-title">Ghost Cube</h1>
-        <p class="hero-sub">Drag or click the model to orbit it any time — scroll down to explode it apart piece by piece, scroll back up to reassemble it.</p>
+        <p class="hero-sub">Drag or click the model to orbit it any time — keep scrolling to see it open up and reveal what's inside.</p>
       </section>
 
       <!-- PHYSICS DEEP-DIVE -->
@@ -132,65 +134,20 @@
         </div>
       </section>
 
-    </main>
+      <div id="marker-ghost-end" class="phase-marker" aria-hidden="true"></div>
 
-    <!-- ============ RIGHT: STICKY 3D VIEWER PANEL (GHOST CUBE) ============ -->
-    <aside class="viewer-panel">
-      <canvas class="viewer-canvas"></canvas>
+      <!-- 3D TRANSITION: pure scroll-driven space — no text, the Ghost Cube
+           expands outward in 3D while the Red Cube grows from within it and
+           the camera pans/zooms across, all in the shared scene below. -->
+      <div class="transition-space" aria-hidden="true"></div>
 
-      <div class="hud">
-        <div class="hud-top">
-          <div class="instructions">
-            <span class="instr-item"><span class="instr-key">DRAG</span> = หมุนโมเดล</span>
-            <span class="instr-sep">/</span>
-            <span class="instr-item"><span class="instr-key">SCROLL</span> = ระเบิดชิ้นส่วน</span>
-          </div>
-
-          <div class="tools-cluster">
-            <div class="tools-tray">
-              <button class="btn btn-ghost reset-btn" type="button" aria-label="รีเซ็ตมุมมองทั้งหมด">
-                <span class="reset-icon" aria-hidden="true">↺</span> RESET
-              </button>
-              <button class="btn btn-icon env-btn" type="button" title="สลับแสงแวดล้อม" aria-pressed="true">☀</button>
-              <button class="btn btn-icon fullscreen-btn" type="button" title="เต็มจอ">⛶</button>
-            </div>
-            <button class="btn btn-icon tools-toggle" type="button" title="เครื่องมือ" aria-expanded="false">
-              <span class="tools-toggle-icon" aria-hidden="true">⋯</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="hud-bottom">
-          <div class="progress-wrap" aria-hidden="false">
-            <span class="progress-label-left">NORMAL</span>
-            <div class="progress-track">
-              <div class="progress-fill"></div>
-              <div class="progress-dot"></div>
-            </div>
-            <span class="progress-label-right">EXPLODED</span>
-            <span class="progress-percent">0%</span>
-          </div>
-
-          <div class="qol-controls">
-            <button class="btn btn-icon autorotate-btn" type="button" title="สลับหมุนอัตโนมัติ" aria-pressed="false">⟳</button>
-          </div>
-        </div>
-      </div>
-
-    </aside>
-
-  </section>
-
-  <!-- ============ SHOWCASE 2: RUBIK'S CUBE (3x3x3) ============ -->
-  <section class="showcase" id="rubik-showcase">
-
-    <main class="content-col">
+      <div id="marker-transition-end" class="phase-marker" aria-hidden="true"></div>
 
       <!-- HERO -->
       <section class="hero reveal" id="hero">
         <p class="eyebrow">Physics-Driven 3D Puzzle</p>
         <h1 class="hero-title">Rubik's Cube<br><span class="hero-title-accent">(3x3x3)</span></h1>
-        <p class="hero-sub">Drag or click the model to orbit it any time — scroll down to explode the metallic red cube apart piece by piece, scroll back up to reassemble it.</p>
+        <p class="hero-sub">Drag or click the metallic red cube to orbit it any time — keep scrolling to the end to watch it explode apart piece by piece.</p>
       </section>
 
       <!-- PHYSICS DEEP-DIVE -->
@@ -236,9 +193,22 @@
         </div>
       </section>
 
+      <div id="marker-rubik-text-end" class="phase-marker" aria-hidden="true"></div>
+
+      <!-- FINAL EXPLODE CUE — scrolling through this drives the Red Cube's
+           own explode/reassemble timeline (reversible on scroll-up). -->
+      <section class="hero reveal explode-cue">
+        <p class="eyebrow">Full Disassembly</p>
+        <h2 class="hero-title">Watch It Come Apart</h2>
+        <p class="hero-sub">Keep scrolling to explode every piece of the Red Cube apart — scroll back up to reassemble it instantly.</p>
+      </section>
+      <div class="explode-space" aria-hidden="true"></div>
+
     </main>
 
-    <!-- ============ RIGHT: STICKY 3D VIEWER PANEL (RUBIK) ============ -->
+    <!-- ============ RIGHT: STICKY 3D VIEWER PANEL (shared for the whole
+         journey — Ghost Cube, the transition, and the Rubik's Cube all
+         render into this one canvas/scene). ============ -->
     <aside class="viewer-panel">
       <canvas class="viewer-canvas"></canvas>
 
@@ -247,7 +217,7 @@
           <div class="instructions">
             <span class="instr-item"><span class="instr-key">DRAG</span> = หมุนโมเดล</span>
             <span class="instr-sep">/</span>
-            <span class="instr-item"><span class="instr-key">SCROLL</span> = ระเบิดชิ้นส่วน</span>
+            <span class="instr-item"><span class="instr-key">SCROLL</span> = เล่นแอนิเมชัน</span>
           </div>
 
           <div class="tools-cluster">
@@ -285,7 +255,7 @@
 
   </section>
 
-  <!-- ============ DEPLOY / OUTRO (shared, after both showcases) ============ -->
+  <!-- ============ DEPLOY / OUTRO (shared, after the showcase) ============ -->
   <main class="outro-col">
     <section id="deploy-section" class="deploy-section">
       <div class="deploy-inner reveal">
@@ -311,6 +281,6 @@
     }
   }
   </script>
-  <script type="module" src="./script.js?v=6"></script>
+  <script type="module" src="./script.js?v=7"></script>
 </body>
 </html>
