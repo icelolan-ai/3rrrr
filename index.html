@@ -6,6 +6,15 @@
 <title>RUBRIC — Interactive 3D Explosion Experience</title>
 <meta name="description" content="An interactive scroll-driven 3D presentation of a Rubik's cube — drag to rotate any time, scroll to explode." />
 <meta name="theme-color" content="#0a0a0c" />
+<script>
+  (function () {
+    try {
+      if (localStorage.getItem('rubric3d-theme') === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    } catch (e) {}
+  })();
+</script>
 <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -40,10 +49,15 @@
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-text">RUBRIC<span class="brand-accent">.3D</span></span>
     </div>
-    <button id="menu-toggle-btn" class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-menu">
-      <span class="menu-toggle-label" data-open-label="MENU" data-close-label="CLOSE">MENU</span>
-      <span class="menu-toggle-burger" aria-hidden="true"><i></i><i></i></span>
-    </button>
+    <div class="header-actions">
+      <button id="theme-toggle-btn" class="btn btn-icon theme-toggle" type="button" title="สลับโทนสีเว็บ (ขาว/แดง)" aria-pressed="false">
+        <span class="theme-toggle-icon" aria-hidden="true">◐</span>
+      </button>
+      <button id="menu-toggle-btn" class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-menu">
+        <span class="menu-toggle-label" data-open-label="MENU" data-close-label="CLOSE">MENU</span>
+        <span class="menu-toggle-burger" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
   </header>
 
   <!-- ============ FULL-SCREEN MENU OVERLAY ============ -->

@@ -168,6 +168,37 @@ class LightingManager {
     this.ambient.intensity = this.envEnabled ? 0.35 : 0.9;
     return this.envEnabled;
   }
+
+  /** Adds a shadow-only ground plane beneath the model so the cube casts a
+   *  soft contact shadow, sized/positioned from the model's bounding box and
+   *  matched to the key light's shadow-camera frustum. */
+  addGroundShadow(boundingBox) {
+    const size = new THREE.Vector3();
+    boundingBox.getSize(size);
+    const center = new THREE.Vector3();
+    boundingBox.getCenter(center);
+
+    const footprint = Math.max(size.x, size.z, 0.001) * 0.5;
+    const planeSize = footprint * 10;
+
+    const shadowCam = this.keyLight.shadow.camera;
+    shadowCam.left = -footprint * 3;
+    shadowCam.right = footprint * 3;
+    shadowCam.top = footprint * 3;
+    shadowCam.bottom = -footprint * 3;
+    shadowCam.near = 0.5;
+    shadowCam.far = footprint * 12 + 10;
+    shadowCam.updateProjectionMatrix();
+
+    const geometry = new THREE.PlaneGeometry(planeSize, planeSize);
+    const material = new THREE.ShadowMaterial({ opacity: 0.4 });
+    const plane = new THREE.Mesh(geometry, material);
+    plane.rotation.x = -Math.PI / 2;
+    plane.position.set(center.x, boundingBox.min.y - size.y * 0.02, center.z);
+    plane.receiveShadow = true;
+    this.sceneManager.scene.add(plane);
+    this.groundPlane = plane;
+  }
 }
 
 /* ==========================================================================
@@ -619,6 +650,50 @@ class InteractionController {
 }
 
 /* ==========================================================================
+   ThemeManager
+   Toggles the site's tone between the default dark theme and a white/red
+   light theme. The <html data-theme="light"> attribute (applied instantly
+   by an inline script in <head> to avoid flash-of-wrong-theme) drives all
+   the CSS custom properties; this class just wires up the button and keeps
+   the WebGL canvas clear color / meta theme-color in sync.
+   ========================================================================== */
+class ThemeManager {
+  constructor(sceneManager) {
+    this.sceneManager = sceneManager;
+    this.storageKey = 'rubric3d-theme';
+    this.clearColors = { dark: 0x0a0a0c, light: 0xffffff };
+    this.metaColors = { dark: '#0a0a0c', light: '#ffffff' };
+
+    this.btn = document.getElementById('theme-toggle-btn');
+    this.icon = this.btn?.querySelector('.theme-toggle-icon');
+    this.metaThemeColor = document.querySelector('meta[name="theme-color"]');
+
+    this._render(this._currentTheme());
+    this.btn?.addEventListener('click', () => this._toggle());
+  }
+
+  _currentTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  }
+
+  _toggle() {
+    const next = this._currentTheme() === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    try {
+      localStorage.setItem(this.storageKey, next);
+    } catch (e) {}
+    this._render(next);
+  }
+
+  _render(theme) {
+    this.btn?.setAttribute('aria-pressed', String(theme === 'light'));
+    if (this.icon) this.icon.textContent = theme === 'light' ? '◑' : '◐';
+    if (this.metaThemeColor) this.metaThemeColor.setAttribute('content', this.metaColors[theme]);
+    this.sceneManager.renderer.setClearColor(this.clearColors[theme], 1);
+  }
+}
+
+/* ==========================================================================
    UIManager
    ========================================================================== */
 class UIManager {
@@ -762,6 +837,7 @@ class App {
     this.canvas = document.getElementById('viewer-canvas');
     this.loadingManager = new LoadingManager();
     this.sceneManager = new SceneManager(this.canvas);
+    this.themeManager = new ThemeManager(this.sceneManager);
   }
 
   async init() {
@@ -772,6 +848,7 @@ class App {
       this.cameraController = new CameraController(this.sceneManager);
 
       await this.modelManager.loadAll();
+      this.lightingManager.addGroundShadow(this.modelManager.boundingBox);
 
       this.cameraController.frameToSphere(this.modelManager.boundingSphere);
       this.animationManager = new AnimationManager(this.modelManager);
