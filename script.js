@@ -324,7 +324,19 @@ class CameraController {
     this.minRadius = 3;
     this.maxRadius = 22;
 
-    this.rotateDamping = 10;
+    // Spring-damper state for theta/phi: v = (v + force*k) * damping; pos += v
+    // Gives the orbit real "weight" instead of a flat exponential ease.
+    this.velTheta = 0;
+    this.velPhi = 0;
+    this.springK = 0.12;
+    this.springDamping = 0.8;
+
+    // Residual fling velocity applied after the user releases a fast drag
+    // (momentum/inertia), independently decaying until it settles to zero.
+    this.flingTheta = 0;
+    this.flingPhi = 0;
+    this.flingDamping = 0.94;
+
     this.zoomDamping = 8;
 
     this.autoRotate = false;
@@ -355,6 +367,19 @@ class CameraController {
     this.targetPhi = Utils.clamp(this.targetPhi - deltaPhiPx * sensitivity, this.minPhi, this.maxPhi);
   }
 
+  /** Called on drag release with the final pointer velocity (px/event) to
+   *  keep the orbit spinning briefly, decaying naturally (flick-to-spin). */
+  applyFling(deltaThetaPx, deltaPhiPx, sensitivity = 0.006) {
+    this.flingTheta = -deltaThetaPx * sensitivity;
+    this.flingPhi = -deltaPhiPx * sensitivity;
+  }
+
+  /** Called when a new drag starts, so a stale fling doesn't fight the grab. */
+  cancelFling() {
+    this.flingTheta = 0;
+    this.flingPhi = 0;
+  }
+
   zoomBy(factor) {
     this.targetRadius = Utils.clamp(this.targetRadius * factor, this.minRadius, this.maxRadius);
   }
@@ -368,13 +393,35 @@ class CameraController {
     this.targetTheta = this._defaults.theta;
     this.targetPhi = this._defaults.phi;
     this.targetRadius = this._defaults.radius;
+    this.velTheta = 0;
+    this.velPhi = 0;
+    this.cancelFling();
   }
 
   update(dt) {
     if (this.autoRotate) this.targetTheta += this.autoRotateSpeed * dt;
 
-    this.theta = Utils.damp(this.theta, this.targetTheta, this.rotateDamping, dt);
-    this.phi = Utils.damp(this.phi, this.targetPhi, this.rotateDamping, dt);
+    // Momentum: fling keeps nudging the target forward, decaying to zero.
+    if (Math.abs(this.flingTheta) > 0.0001 || Math.abs(this.flingPhi) > 0.0001) {
+      this.targetTheta += this.flingTheta;
+      this.targetPhi = Utils.clamp(this.targetPhi + this.flingPhi, this.minPhi, this.maxPhi);
+      this.flingTheta *= this.flingDamping;
+      this.flingPhi *= this.flingDamping;
+    } else {
+      this.flingTheta = 0;
+      this.flingPhi = 0;
+    }
+
+    // Spring-damper follow: gives the orbit real weight/inertia rather than
+    // a flat ease, per v = (v + force*k) * damping; pos += v.
+    const forceTheta = (this.targetTheta - this.theta) * this.springK;
+    this.velTheta = (this.velTheta + forceTheta) * this.springDamping;
+    this.theta += this.velTheta;
+
+    const forcePhi = (this.targetPhi - this.phi) * this.springK;
+    this.velPhi = (this.velPhi + forcePhi) * this.springDamping;
+    this.phi = Utils.clamp(this.phi + this.velPhi, this.minPhi, this.maxPhi);
+
     this.radius = Utils.damp(this.radius, this.targetRadius, this.zoomDamping, dt);
     this._updatePosition(false);
   }
@@ -469,9 +516,11 @@ class InteractionController {
     this.canvas = canvas;
     this.cameraController = cameraController;
 
-    this._dragging = false;
+    this.isDragging = false; // exposed for tactile "grab" scale feedback
     this._lastX = 0;
     this._lastY = 0;
+    this._lastDx = 0; // smoothed latest delta, used as release velocity for fling
+    this._lastDy = 0;
 
     this._pinchStartDist = 0;
     this._pinchStartRadius = 0;
@@ -483,21 +532,32 @@ class InteractionController {
     // Pointer drag (mouse + touch alike) — always rotates, any time.
     this.canvas.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch' && this._activeTouches() >= 2) return; // let pinch handle it
-      this._dragging = true;
+      this.isDragging = true;
       this._lastX = e.clientX;
       this._lastY = e.clientY;
+      this._lastDx = 0;
+      this._lastDy = 0;
+      this.cameraController.cancelFling();
       this.canvas.setPointerCapture(e.pointerId);
     });
     window.addEventListener('pointermove', (e) => {
-      if (!this._dragging) return;
+      if (!this.isDragging) return;
       const dx = e.clientX - this._lastX;
       const dy = e.clientY - this._lastY;
       this._lastX = e.clientX;
       this._lastY = e.clientY;
+      // Light smoothing so a single jittery final event doesn't dominate the fling.
+      this._lastDx = Utils.lerp(this._lastDx, dx, 0.5);
+      this._lastDy = Utils.lerp(this._lastDy, dy, 0.5);
       this.cameraController.rotateBy(dx, dy);
     });
-    window.addEventListener('pointerup', () => { this._dragging = false; });
-    window.addEventListener('pointercancel', () => { this._dragging = false; });
+    const endDrag = () => {
+      if (!this.isDragging) return;
+      this.isDragging = false;
+      this.cameraController.applyFling(this._lastDx, this._lastDy);
+    };
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', endDrag);
 
     // Trackpad pinch (wheel + ctrlKey) / ctrl|shift+wheel = zoom the model.
     // The panel is fixed, so normal wheel scroll here still bubbles to move
@@ -525,7 +585,7 @@ class InteractionController {
   _onTouchStart(e) {
     this._touchCount = e.touches.length;
     if (e.touches.length === 2) {
-      this._dragging = false;
+      this.isDragging = false;
       this._pinchStartDist = this._touchDistance(e.touches);
       this._pinchStartRadius = this.cameraController.targetRadius;
     }
@@ -573,10 +633,37 @@ class UIManager {
     this.progressDot = document.getElementById('progress-dot');
     this.progressPercent = document.getElementById('progress-percent');
     this.instructions = document.getElementById('instructions');
+    this.progressWrap = document.querySelector('.progress-wrap');
 
     this._bindButtons();
+    this._bindMenu();
     this._bindReveals();
     this._instructionsFaded = false;
+  }
+
+  _bindMenu() {
+    const toggleBtn = document.getElementById('menu-toggle-btn');
+    const menu = document.getElementById('site-menu');
+    const label = toggleBtn.querySelector('.menu-toggle-label');
+
+    const setOpen = (open) => {
+      menu.classList.toggle('open', open);
+      menu.setAttribute('aria-hidden', String(!open));
+      toggleBtn.setAttribute('aria-expanded', String(open));
+      label.textContent = open ? label.dataset.closeLabel : label.dataset.openLabel;
+    };
+
+    toggleBtn.addEventListener('click', () => setOpen(!menu.classList.contains('open')));
+    menu.querySelectorAll('[data-menu-link]').forEach((link) => {
+      link.addEventListener('click', () => setOpen(false));
+    });
+
+    const progressToggle = document.getElementById('progress-toggle-btn');
+    progressToggle.addEventListener('click', () => {
+      const nowVisible = progressToggle.getAttribute('aria-pressed') !== 'true';
+      progressToggle.setAttribute('aria-pressed', String(nowVisible));
+      this.progressWrap.classList.toggle('is-hidden', !nowVisible);
+    });
   }
 
   _bindButtons() {
@@ -602,6 +689,14 @@ class UIManager {
     });
 
     document.getElementById('error-retry-btn').addEventListener('click', () => window.location.reload());
+
+    const toolsToggle = document.getElementById('tools-toggle-btn');
+    const toolsTray = document.getElementById('tools-tray');
+    toolsToggle.addEventListener('click', () => {
+      const open = !toolsTray.classList.contains('open');
+      toolsTray.classList.toggle('open', open);
+      toolsToggle.setAttribute('aria-expanded', String(open));
+    });
   }
 
   _bindReveals() {
@@ -715,6 +810,13 @@ class App {
     this.animationManager.setProgress(progress);
     this.cameraController.update(dt);
     this.uiManager.updateProgressUI(progress);
+
+    // Tactile "grab" feedback: the model eases to a slightly smaller scale
+    // while actively being dragged, and springs back to normal on release.
+    const targetScale = this.interactionController.isDragging ? 0.965 : 1;
+    const root = this.modelManager.root;
+    const nextScale = Utils.damp(root.scale.x, targetScale, 10, dt);
+    root.scale.setScalar(nextScale);
   }
 
   reset() {
