@@ -174,62 +174,6 @@ class LightingManager {
     return this.envEnabled;
   }
 
-  /** A radial gradient (opaque center -> transparent edge) used to fade the
-   *  ground shadow out softly, instead of letting it hard-clip against the
-   *  edge of the (bleeding, transparent) canvas. */
-  _getShadowFadeTexture() {
-    if (this._shadowFadeTexture) return this._shadowFadeTexture;
-    const size = 256;
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    gradient.addColorStop(0, 'rgba(255,255,255,1)');
-    gradient.addColorStop(0.35, 'rgba(255,255,255,0.7)');
-    gradient.addColorStop(0.75, 'rgba(255,255,255,0.15)');
-    gradient.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, size, size);
-    this._shadowFadeTexture = new THREE.CanvasTexture(canvas);
-    return this._shadowFadeTexture;
-  }
-
-  /** Adds a shadow-only ground plane beneath the model so the cube casts a
-   *  soft contact shadow, sized/positioned from the model's bounding box and
-   *  matched to the key light's shadow-camera frustum. Faded radially so it
-   *  never hard-clips against the canvas edge. */
-  addGroundShadow(boundingBox) {
-    const size = new THREE.Vector3();
-    boundingBox.getSize(size);
-    const center = new THREE.Vector3();
-    boundingBox.getCenter(center);
-
-    const footprint = Math.max(size.x, size.z, 0.001) * 0.5;
-    // Kept close to the cube's own footprint (rather than a large "infinite
-    // ground") so the faded edge always resolves well inside the canvas,
-    // even when the camera orbits to a grazing angle.
-    const planeSize = footprint * 3;
-
-    const shadowCam = this.keyLight.shadow.camera;
-    shadowCam.left = -footprint * 3;
-    shadowCam.right = footprint * 3;
-    shadowCam.top = footprint * 3;
-    shadowCam.bottom = -footprint * 3;
-    shadowCam.near = 0.5;
-    shadowCam.far = footprint * 12 + 10;
-    shadowCam.updateProjectionMatrix();
-
-    const geometry = new THREE.PlaneGeometry(planeSize, planeSize);
-    const material = new THREE.ShadowMaterial({ opacity: 0.45 });
-    material.alphaMap = this._getShadowFadeTexture();
-    material.transparent = true;
-    const plane = new THREE.Mesh(geometry, material);
-    plane.rotation.x = -Math.PI / 2;
-    plane.position.set(center.x, boundingBox.min.y - size.y * 0.02, center.z);
-    plane.receiveShadow = true;
-    this.sceneManager.scene.add(plane);
-    this.groundPlane = plane;
-  }
 }
 
 /* ==========================================================================
@@ -464,7 +408,11 @@ class CameraController {
     const hFovRad = 2 * Math.atan(Math.tan(vFovRad / 2) * aspect);
     const limitingFovRad = Math.min(vFovRad, hFovRad);
 
-    const fitDist = (sphere.radius * 1.65) / Math.sin(limitingFovRad / 2);
+    // Margin above the exact "just fits" distance — kept modest (rather than
+    // the roomier 1.65 this used to be) so the cube reads bigger by default,
+    // while still comfortably covering the fully-exploded state this sphere
+    // is sized for.
+    const fitDist = (sphere.radius * 1.4) / Math.sin(limitingFovRad / 2);
     this.minRadius = Math.max(2.5, sphere.radius * 1.15);
     this.maxRadius = sphere.radius * 6;
     // Upper bound follows maxRadius (not a fixed constant) so a sphere sized
@@ -947,7 +895,6 @@ class App {
       this.cameraController = new CameraController(this.sceneManager);
 
       await this.modelManager.loadAll();
-      this.lightingManager.addGroundShadow(this.modelManager.boundingBox);
 
       this.cameraController.frameToSphere(this.modelManager.boundingSphere);
       this.animationManager = new AnimationManager(this.modelManager);
