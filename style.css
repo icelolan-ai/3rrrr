@@ -77,10 +77,70 @@ button{ font-family:inherit; cursor:pointer; }
 }
 .brand-text{ font-weight:800; letter-spacing:.04em; font-size:15px; }
 .brand-accent{ color:var(--accent-glow); }
-.site-nav{ display:flex; gap:32px; font-size:13px; color:var(--ink-dim); }
-.site-nav a{ transition:color .3s var(--ease); }
-.site-nav a:hover{ color:var(--ink); }
-@media (max-width:720px){ .site-nav{ display:none; } }
+
+/* ==========================================================================
+   Menu toggle + full-screen menu overlay (Awwwards-style)
+   ========================================================================== */
+.menu-toggle{
+  pointer-events:auto;
+  display:flex; align-items:center; gap:12px;
+  background:none; border:none; color:var(--ink);
+  font-size:11px; font-weight:700; letter-spacing:.18em;
+}
+.menu-toggle-burger{ display:flex; flex-direction:column; gap:5px; width:22px; }
+.menu-toggle-burger i{
+  display:block; height:1.5px; width:100%; background:var(--ink);
+  transition:transform .4s var(--ease), opacity .4s var(--ease);
+}
+.menu-toggle[aria-expanded="true"] .menu-toggle-burger i:nth-child(1){ transform:translateY(3.25px) rotate(45deg); }
+.menu-toggle[aria-expanded="true"] .menu-toggle-burger i:nth-child(2){ transform:translateY(-3.25px) rotate(-45deg); }
+
+.site-menu{
+  position:fixed; inset:0; z-index:80;
+  background:rgba(8,8,10,.98); backdrop-filter:blur(18px);
+  opacity:0; visibility:hidden; pointer-events:none;
+  transition:opacity .5s var(--ease), visibility .5s var(--ease);
+  display:flex; align-items:center;
+}
+.site-menu.open{ opacity:1; visibility:visible; pointer-events:auto; }
+.site-menu-inner{
+  width:100%; padding:0 clamp(24px,8vw,120px);
+  display:flex; flex-direction:column; gap:56px;
+}
+.site-menu-links{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.site-menu-link{
+  display:flex; align-items:baseline; gap:20px;
+  font-size:clamp(34px,7vw,72px); font-weight:800; letter-spacing:-.02em;
+  color:var(--ink-dim); padding:6px 0;
+  transition:color .35s var(--ease), transform .35s var(--ease);
+}
+.site-menu-link:hover{ color:var(--ink); transform:translateX(10px); }
+.site-menu-index{ font-size:14px; font-weight:600; color:var(--accent-glow); letter-spacing:.08em; }
+
+.site-menu-settings{
+  display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap;
+  border-top:1px solid var(--line); padding-top:28px; max-width:520px;
+}
+.site-menu-settings-label{ margin:0; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint); }
+
+.menu-switch{
+  display:flex; align-items:center; gap:12px;
+  background:none; border:none; color:var(--ink); font-size:13.5px; font-weight:600;
+}
+.menu-switch-track{
+  position:relative; width:44px; height:24px; border-radius:999px;
+  background:var(--line); transition:background .3s var(--ease); flex-shrink:0;
+}
+.menu-switch-thumb{
+  position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%;
+  background:var(--ink-dim); transition:transform .3s var(--ease), background .3s var(--ease);
+}
+.menu-switch[aria-pressed="true"] .menu-switch-track{ background:var(--accent); }
+.menu-switch[aria-pressed="true"] .menu-switch-thumb{ transform:translateX(20px); background:#fff; }
+
+@media (max-width:600px){
+  .site-menu-link{ font-size:clamp(28px,9vw,44px); }
+}
 
 /* ==========================================================================
    Layout — fixed 3D panel on the right, scrolling content on the left
@@ -122,7 +182,13 @@ button{ font-family:inherit; cursor:pointer; }
   .layout{ flex-direction:column; }
   .content-col{ width:100%; padding-top:calc(46svh + 8px); }
   .viewer-panel{ height:46svh; border-left:none; border-bottom:1px solid var(--line); }
-  .hud{ padding-top:calc(var(--header-h) - 30px); }
+  .hud{
+    justify-content:flex-start; gap:10px;
+    padding-top:calc(var(--header-h) - 30px);
+  }
+  .hud-bottom{ flex-direction:column; align-items:stretch; gap:10px; }
+  .progress-wrap{ max-width:none; }
+  .qol-controls{ justify-content:flex-end; }
 }
 
 /* ==========================================================================
@@ -174,7 +240,9 @@ button{ font-family:inherit; cursor:pointer; }
   background:rgba(18,18,22,.6); backdrop-filter:blur(14px);
   border:1px solid var(--line); border-radius:999px;
   padding:10px 18px; flex:1; min-width:260px; max-width:520px;
+  transition:opacity .35s var(--ease), transform .35s var(--ease);
 }
+.progress-wrap.is-hidden{ opacity:0; transform:translateY(8px); pointer-events:none; }
 .progress-label-left,.progress-label-right{ font-size:10px; letter-spacing:.12em; color:var(--ink-faint); white-space:nowrap; }
 .progress-track{ position:relative; flex:1; height:3px; background:var(--line); border-radius:2px; }
 .progress-fill{ position:absolute; left:0; top:0; height:100%; width:0%; background:linear-gradient(90deg, var(--accent), var(--accent-glow)); border-radius:2px; }
@@ -183,8 +251,28 @@ button{ font-family:inherit; cursor:pointer; }
 
 .qol-controls{ display:flex; gap:8px; }
 
-.reset-btn{ font-size:12px; padding:10px 18px; }
+.reset-btn{ font-size:12px; padding:10px 18px; white-space:nowrap; }
 .reset-icon{ font-size:14px; }
+
+/* ==========================================================================
+   Sliding tools tray (reset / env / fullscreen), toggled by one button
+   ========================================================================== */
+.tools-cluster{ display:flex; align-items:center; gap:8px; }
+
+.tools-tray{
+  display:flex; align-items:center; gap:8px;
+  max-width:0; opacity:0; overflow:hidden;
+  transition:max-width .45s var(--ease), opacity .3s var(--ease), margin-right .45s var(--ease);
+}
+.tools-tray.open{ max-width:280px; opacity:1; margin-right:2px; }
+.tools-tray > .btn{ flex-shrink:0; }
+
+.tools-toggle-icon{ display:inline-block; transition:transform .35s var(--ease); font-size:18px; line-height:1; }
+.tools-toggle[aria-expanded="true"] .tools-toggle-icon{ transform:rotate(90deg); }
+
+@media (max-width:420px){
+  .tools-tray.open{ max-width:220px; }
+}
 
 /* ==========================================================================
    Loading overlay
