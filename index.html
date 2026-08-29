@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>RUBRIC — Interactive 3D Explosion Experience</title>
-<meta name="description" content="An interactive scroll-driven 3D presentation of a Rubik's cube — drag to rotate any time, scroll to explode." />
+<meta name="description" content="An interactive scroll-driven 3D presentation featuring a Rubik's cube and a Ghost Cube — drag to rotate any time, scroll to explode." />
 <meta name="theme-color" content="#0a0a0c" />
 <script>
   (function () {
@@ -15,7 +15,7 @@
     } catch (e) {}
   })();
 </script>
-<link rel="stylesheet" href="./style.css?v=4" />
+<link rel="stylesheet" href="./style.css?v=5" />
 </head>
 <body>
 
@@ -64,9 +64,10 @@
   <nav id="site-menu" class="site-menu" aria-hidden="true">
     <div class="site-menu-inner">
       <ol class="site-menu-links">
-        <li><a href="#hero" class="site-menu-link" data-menu-link><span class="site-menu-index">01</span>Home</a></li>
+        <li><a href="#hero" class="site-menu-link" data-menu-link><span class="site-menu-index">01</span>Rubik's Cube</a></li>
         <li><a href="#details-section" class="site-menu-link" data-menu-link><span class="site-menu-index">02</span>Details</a></li>
-        <li><a href="#deploy-section" class="site-menu-link" data-menu-link><span class="site-menu-index">03</span>Deploy</a></li>
+        <li><a href="#ghost-hero" class="site-menu-link" data-menu-link><span class="site-menu-index">03</span>Ghost Cube</a></li>
+        <li><a href="#deploy-section" class="site-menu-link" data-menu-link><span class="site-menu-index">04</span>Deploy</a></li>
       </ol>
 
       <div class="site-menu-settings">
@@ -79,9 +80,9 @@
     </div>
   </nav>
 
-  <div class="layout">
+  <!-- ============ SHOWCASE 1: RUBIK'S CUBE ============ -->
+  <section class="showcase" id="rubik-showcase">
 
-    <!-- ============ LEFT: SCROLLING CONTENT ============ -->
     <main class="content-col">
 
       <!-- HERO -->
@@ -116,11 +117,11 @@
           </div>
           <div class="bento-card reveal">
             <h3>Scroll = Timeline</h3>
-            <p>ตำแหน่ง scroll ของทั้งหน้าเว็บถูกแปลงเป็นค่า progress 0.0–1.0 แบบ deterministic กลับไปตำแหน่งเดิมได้เป๊ะทุกครั้ง</p>
+            <p>ตำแหน่ง scroll ของแต่ละโมเดลถูกแปลงเป็นค่า progress 0.0–1.0 แบบ deterministic กลับไปตำแหน่งเดิมได้เป๊ะทุกครั้ง</p>
           </div>
           <div class="bento-card reveal">
             <h3>Rotate Anytime</h3>
-            <p>แผงโมเดล 3D ตรึงอยู่ทางขวาเสมอ ลากหรือคลิกหมุนได้ตลอดเวลาโดยไม่ขัดกับการเลื่อนหน้าเว็บฝั่งซ้าย</p>
+            <p>แผงโมเดล 3D ตรึงอยู่ทางขวาตลอดช่วงที่ส่วนนั้นอยู่ในจอ ลากหรือคลิกหมุนได้ตลอดเวลาโดยไม่ขัดกับการเลื่อนหน้าเว็บฝั่งซ้าย</p>
           </div>
           <div class="bento-card reveal">
             <h3>PBR Metallic Lighting</h3>
@@ -128,47 +129,34 @@
           </div>
           <div class="bento-card bento-wide reveal">
             <h3>Modular & Extensible</h3>
-            <p>แยกเป็น SceneManager, ModelManager, AnimationManager, ScrollController, InteractionController, CameraController, LightingManager, UIManager — พร้อมต่อยอด hotspot, isolate part, label ในอนาคต</p>
+            <p>แยกเป็น SceneManager, ModelManager, AnimationManager, ScrollController, InteractionController, CameraController, LightingManager, UIManager — แต่ละโมเดลรันเป็น Experience อิสระของตัวเอง พร้อมต่อยอดโมเดลเพิ่มเติมในอนาคต</p>
           </div>
         </div>
       </section>
 
-      <!-- DEPLOY / OUTRO -->
-      <section id="deploy-section" class="deploy-section">
-        <div class="deploy-inner reveal">
-          <p class="eyebrow">Ready for GitHub Pages</p>
-          <h2>อัปโหลดแล้วใช้งานได้ทันที</h2>
-          <p class="deploy-sub">โปรเจกต์นี้เป็น static site ล้วน ไม่มี backend ไม่มี Windows path — ดูวิธีติดตั้งแบบละเอียดใน README.md</p>
-        </div>
-      </section>
-
-      <footer class="site-footer">
-        <span>© 2026 RUBRIC.3D — Built with Three.js</span>
-      </footer>
-
     </main>
 
-    <!-- ============ RIGHT: FIXED 3D VIEWER PANEL ============ -->
-    <aside class="viewer-panel" id="viewer-panel">
-      <canvas id="viewer-canvas" class="viewer-canvas"></canvas>
+    <!-- ============ RIGHT: STICKY 3D VIEWER PANEL (RUBIK) ============ -->
+    <aside class="viewer-panel">
+      <canvas class="viewer-canvas"></canvas>
 
       <div class="hud">
         <div class="hud-top">
-          <div class="instructions" id="instructions">
+          <div class="instructions">
             <span class="instr-item"><span class="instr-key">DRAG</span> = หมุนโมเดล</span>
             <span class="instr-sep">/</span>
             <span class="instr-item"><span class="instr-key">SCROLL</span> = ระเบิดชิ้นส่วน</span>
           </div>
 
           <div class="tools-cluster">
-            <div id="tools-tray" class="tools-tray">
-              <button id="reset-btn" class="btn btn-ghost reset-btn" type="button" aria-label="รีเซ็ตมุมมองทั้งหมด">
+            <div class="tools-tray">
+              <button class="btn btn-ghost reset-btn" type="button" aria-label="รีเซ็ตมุมมองทั้งหมด">
                 <span class="reset-icon" aria-hidden="true">↺</span> RESET
               </button>
-              <button id="env-btn" class="btn btn-icon" type="button" title="สลับแสงแวดล้อม" aria-pressed="true">☀</button>
-              <button id="fullscreen-btn" class="btn btn-icon" type="button" title="เต็มจอ">⛶</button>
+              <button class="btn btn-icon env-btn" type="button" title="สลับแสงแวดล้อม" aria-pressed="true">☀</button>
+              <button class="btn btn-icon fullscreen-btn" type="button" title="เต็มจอ">⛶</button>
             </div>
-            <button id="tools-toggle-btn" class="btn btn-icon tools-toggle" type="button" title="เครื่องมือ" aria-expanded="false" aria-controls="tools-tray">
+            <button class="btn btn-icon tools-toggle" type="button" title="เครื่องมือ" aria-expanded="false">
               <span class="tools-toggle-icon" aria-hidden="true">⋯</span>
             </button>
           </div>
@@ -178,22 +166,128 @@
           <div class="progress-wrap" aria-hidden="false">
             <span class="progress-label-left">NORMAL</span>
             <div class="progress-track">
-              <div id="progress-fill" class="progress-fill"></div>
-              <div id="progress-dot" class="progress-dot"></div>
+              <div class="progress-fill"></div>
+              <div class="progress-dot"></div>
             </div>
             <span class="progress-label-right">EXPLODED</span>
-            <span id="progress-percent" class="progress-percent">0%</span>
+            <span class="progress-percent">0%</span>
           </div>
 
           <div class="qol-controls">
-            <button id="autorotate-btn" class="btn btn-icon" type="button" title="สลับหมุนอัตโนมัติ" aria-pressed="false">⟳</button>
+            <button class="btn btn-icon autorotate-btn" type="button" title="สลับหมุนอัตโนมัติ" aria-pressed="false">⟳</button>
           </div>
         </div>
       </div>
 
     </aside>
 
-  </div>
+  </section>
+
+  <!-- ============ SHOWCASE 2: GHOST CUBE ============ -->
+  <section class="showcase" id="ghost-showcase">
+
+    <main class="content-col">
+
+      <!-- HERO -->
+      <section class="hero" id="ghost-hero">
+        <p class="eyebrow">Interactive 3D Product Presentation</p>
+        <h1 class="hero-title">โกสต์คิวบ์<br><span class="hero-title-accent">พื้นผิวเฉียงมุม</span></h1>
+        <p class="hero-sub">Ghost Cube ปริศนาทรงเหลี่ยมเฉียงสีเหล็กน้ำเงิน ลากหรือคลิกที่โมเดลเพื่อหมุนดูได้ทุกเมื่อ — เลื่อนหน้าจอลงเพื่อค่อยๆ ระเบิดชิ้นส่วนออก แล้วเลื่อนขึ้นเพื่อประกอบกลับคืนเหมือนเดิม</p>
+
+        <div class="hero-stats">
+          <div class="hero-stat-cell reveal">
+            <span class="stat-num">26</span>
+            <span class="stat-label">ชิ้นส่วนโกสต์พีซ<br>เคลื่อนไหวอิสระ</span>
+          </div>
+          <div class="hero-stat-cell reveal">
+            <span class="stat-num">0–100%</span>
+            <span class="stat-label">Scroll-Driven<br>Progress Timeline</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- DETAILS -->
+      <section class="details-section">
+        <div class="section-head reveal">
+          <p class="eyebrow">About this model</p>
+          <h2>โมเดลไฟล์เดียว หลายอนิเมชัน</h2>
+        </div>
+
+        <div class="bento-grid">
+          <div class="bento-card bento-wide reveal">
+            <h3>Single-File, Multi-Clip Explode</h3>
+            <p>ต่างจากรูบิกที่ใช้ไฟล์ GLB สองไฟล์ (ปกติ + ระเบิด) โกสต์คิวบ์เก็บทุกอย่างไว้ในไฟล์เดียว โดยแต่ละชิ้นมี animation clip ของตัวเองที่ไล่จากตำแหน่งประกอบไปยังตำแหน่งระเบิด — โค้ดอ่าน keyframe สุดท้ายของแต่ละ clip มาใช้เป็นเป้าหมายได้ทันที</p>
+          </div>
+          <div class="bento-card reveal">
+            <h3>Steel Blue PBR</h3>
+            <p>วัสดุผิวนอกสีเหล็กน้ำเงินความหยาบต่ำ คู่กับวัสดุด้านในสีดำเข้ม ให้ลุคมันวาวเหมือนโลหะเคลือบภายใต้แสงแวดล้อมแบบเดียวกับรูบิก</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ============ RIGHT: STICKY 3D VIEWER PANEL (GHOST CUBE) ============ -->
+    <aside class="viewer-panel">
+      <canvas class="viewer-canvas"></canvas>
+
+      <div class="hud">
+        <div class="hud-top">
+          <div class="instructions">
+            <span class="instr-item"><span class="instr-key">DRAG</span> = หมุนโมเดล</span>
+            <span class="instr-sep">/</span>
+            <span class="instr-item"><span class="instr-key">SCROLL</span> = ระเบิดชิ้นส่วน</span>
+          </div>
+
+          <div class="tools-cluster">
+            <div class="tools-tray">
+              <button class="btn btn-ghost reset-btn" type="button" aria-label="รีเซ็ตมุมมองทั้งหมด">
+                <span class="reset-icon" aria-hidden="true">↺</span> RESET
+              </button>
+              <button class="btn btn-icon env-btn" type="button" title="สลับแสงแวดล้อม" aria-pressed="true">☀</button>
+              <button class="btn btn-icon fullscreen-btn" type="button" title="เต็มจอ">⛶</button>
+            </div>
+            <button class="btn btn-icon tools-toggle" type="button" title="เครื่องมือ" aria-expanded="false">
+              <span class="tools-toggle-icon" aria-hidden="true">⋯</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="hud-bottom">
+          <div class="progress-wrap" aria-hidden="false">
+            <span class="progress-label-left">NORMAL</span>
+            <div class="progress-track">
+              <div class="progress-fill"></div>
+              <div class="progress-dot"></div>
+            </div>
+            <span class="progress-label-right">EXPLODED</span>
+            <span class="progress-percent">0%</span>
+          </div>
+
+          <div class="qol-controls">
+            <button class="btn btn-icon autorotate-btn" type="button" title="สลับหมุนอัตโนมัติ" aria-pressed="false">⟳</button>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+  </section>
+
+  <!-- ============ DEPLOY / OUTRO (shared, after both showcases) ============ -->
+  <main class="outro-col">
+    <section id="deploy-section" class="deploy-section">
+      <div class="deploy-inner reveal">
+        <p class="eyebrow">Ready for GitHub Pages</p>
+        <h2>อัปโหลดแล้วใช้งานได้ทันที</h2>
+        <p class="deploy-sub">โปรเจกต์นี้เป็น static site ล้วน ไม่มี backend ไม่มี Windows path — ดูวิธีติดตั้งแบบละเอียดใน README.md</p>
+      </div>
+    </section>
+
+    <footer class="site-footer">
+      <span>© 2026 RUBRIC.3D — Built with Three.js</span>
+    </footer>
+  </main>
 
   <script type="importmap">
   {
@@ -204,6 +298,6 @@
     }
   }
   </script>
-  <script type="module" src="./script.js?v=4"></script>
+  <script type="module" src="./script.js?v=5"></script>
 </body>
 </html>

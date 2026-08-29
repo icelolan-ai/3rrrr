@@ -2,17 +2,20 @@
    RUBRIC.3D — Interactive Scroll-Driven 3D Explosion Viewer
    ----------------------------------------------------------------------
    Architecture (modular, extensible):
-     LoadingManager        loading UI + progress aggregation
+     LoadingManager        shared loading UI + progress aggregation
      SceneManager           renderer / scene / render loop / resize
      LightingManager         lights + procedural PBR environment
-     ModelManager             loads GLBs, matches nodes, records A/B transforms
+     ModelManager             loads GLB(s), matches nodes, records A/B transforms
      CameraController          spherical orbit camera, zoom, framing, reset
      AnimationManager           progress -> per-cubelet transform interpolation
-     ScrollController            scrollY -> deterministic target progress
+     ScrollController            per-section scroll -> deterministic progress
      InteractionController        drag rotate / pinch zoom / gesture gating
-     UIManager                    HUD, reset button, progress bar, reveals
+     PanelUIManager                per-panel HUD, reset button, progress bar
      ResponsiveManager             resize / orientation / DPR handling
-     App                           orchestrates everything
+     ThemeManager                  shared dark/light site theme toggle
+     GlobalChrome                  shared menu, reveals, error overlay
+     Experience                    one full 3D showcase (scene+model+scroll)
+     App                           creates the Experiences, shared chrome
    ========================================================================== */
 
 import * as THREE from 'three';
@@ -31,33 +34,62 @@ const Utils = {
   isTouchDevice: () => ('ontouchstart' in window) || navigator.maxTouchPoints > 0,
 };
 
-const MODEL_PATHS = {
-  normal: './models/rubric3x3x3_red.glb',
-  exploded: './models/rubric3x3x3_red_explode.glb',
-};
+// Each entry describes one independent scroll-driven 3D showcase.
+// mode:'dual'   — a normal.glb + a separately-exported exploded.glb, matched
+//                 by node name (the exploded file's baked keyframes are only
+//                 ever read for their final position, never displayed).
+// mode:'single' — one glb whose pieces each carry their own animation clip,
+//                 keyframed from the assembled pose to the exploded pose;
+//                 the same file is displayed AND mined for explode targets.
+const EXPERIENCE_CONFIGS = [
+  {
+    sectionId: 'rubik-showcase',
+    rootName: 'RubikRoot',
+    mode: 'dual',
+    paths: {
+      normal: './models/rubric3x3x3_red.glb',
+      exploded: './models/rubric3x3x3_red_explode.glb',
+    },
+    loadingKeys: { normal: 'rubik-normal', exploded: 'rubik-exploded' },
+  },
+  {
+    sectionId: 'ghost-showcase',
+    rootName: 'GhostRoot',
+    mode: 'single',
+    paths: {
+      single: './models/ghost_cube_steel_blue.glb',
+    },
+    loadingKeys: { single: 'ghost' },
+  },
+];
 
 /* ==========================================================================
    LoadingManager
+   Aggregates progress across an arbitrary set of named resources (spanning
+   every Experience on the page) into one shared loading bar.
    ========================================================================== */
 class LoadingManager {
-  constructor() {
+  constructor(keys) {
     this.overlay = document.getElementById('loading-overlay');
     this.barFill = document.getElementById('loading-bar-fill');
     this.percentLabel = document.getElementById('loading-percent');
-    this.progress = { normal: 0, exploded: 0 };
+    this.progress = {};
+    keys.forEach((key) => {
+      this.progress[key] = 0;
+    });
   }
 
   update(key, ratio) {
     this.progress[key] = Utils.clamp(ratio, 0, 1);
-    const total = (this.progress.normal + this.progress.exploded) / 2;
+    const values = Object.values(this.progress);
+    const total = values.reduce((sum, v) => sum + v, 0) / values.length;
     const pct = Math.round(total * 100);
     this.barFill.style.width = `${pct}%`;
     this.percentLabel.textContent = `${pct}%`;
   }
 
   complete() {
-    this.update('normal', 1);
-    this.update('exploded', 1);
+    for (const key of Object.keys(this.progress)) this.update(key, 1);
     requestAnimationFrame(() => {
       this.overlay.classList.add('hidden');
     });
@@ -178,17 +210,26 @@ class LightingManager {
 
 /* ==========================================================================
    ModelManager
-   Loads the normal GLB (displayed) and the exploded GLB (used only to read
-   its baked keyframe animation and derive each cubelet's exploded transform).
-   Objects are matched by node NAME, which is identical across both files.
+   Two loading modes (see EXPERIENCE_CONFIGS above):
+     'dual'   — loads a normal GLB (displayed) and a separately-exported
+                exploded GLB, matching cubelets by node NAME (identical
+                across both files) and reading only the exploded file's
+                baked keyframe animation, never its scene.
+     'single' — loads one GLB whose scene IS the displayed model, and whose
+                own animation clips (one per piece, assembled -> exploded)
+                are mined for each piece's exploded target.
+   Either way, the result is the same: a `parts` registry of
+   { object3D, basePos, explodedPos } ready for AnimationManager to
+   interpolate between.
    ========================================================================== */
 class ModelManager {
-  constructor(sceneManager, loadingManager) {
+  constructor(sceneManager, loadingManager, config) {
     this.sceneManager = sceneManager;
     this.loadingManager = loadingManager;
+    this.config = config;
     this.loader = new GLTFLoader();
     this.root = new THREE.Group();
-    this.root.name = 'RubikRoot';
+    this.root.name = config.rootName || 'ModelRoot';
     this.sceneManager.scene.add(this.root);
 
     // registry: name -> { object3D, basePos, explodedPos, baseQuat, index }
@@ -198,14 +239,21 @@ class ModelManager {
   }
 
   async loadAll() {
-    const [normalGltf, explodedGltf] = await Promise.all([
-      this._loadOne(MODEL_PATHS.normal, 'normal'),
-      this._loadOne(MODEL_PATHS.exploded, 'exploded'),
-    ]);
-
-    this._buildDisplayModel(normalGltf);
-    this._extractExplodedTargets(explodedGltf);
-    this._disposeGltf(explodedGltf); // only needed its animation data
+    if (this.config.mode === 'dual') {
+      const [normalGltf, explodedGltf] = await Promise.all([
+        this._loadOne(this.config.paths.normal, this.config.loadingKeys.normal),
+        this._loadOne(this.config.paths.exploded, this.config.loadingKeys.exploded),
+      ]);
+      this._buildDisplayModel(normalGltf);
+      this._extractExplodedTargets(explodedGltf);
+      this._disposeGltf(explodedGltf); // only needed its animation data
+    } else {
+      // 'single': the displayed scene and the animation data come from the
+      // same already-loaded gltf, so it's never disposed.
+      const gltf = await this._loadOne(this.config.paths.single, this.config.loadingKeys.single);
+      this._buildDisplayModel(gltf);
+      this._extractExplodedTargets(gltf);
+    }
 
     this._computeBounds();
     return { partCount: this.parts.size };
@@ -247,7 +295,8 @@ class ModelManager {
 
     this.root.add(scene);
 
-    // Flat hierarchy: every cubelet is a direct child node named "Cubelet_x_y_z"
+    // Flat hierarchy: every piece is a direct child node (e.g. "Cubelet_x_y_z"
+    // or "GhostPiece_x_y_z"), matched to its exploded target purely by name.
     scene.children.forEach((child, index) => {
       if (!child.name) return;
       this.parts.set(child.name, {
@@ -548,30 +597,31 @@ class AnimationManager {
 
 /* ==========================================================================
    ScrollController
-   Converts the whole page's scroll position into a deterministic target
-   progress value (0 at the top of the page, 1 at the bottom), then the
-   caller smooths toward it. The 3D panel itself is fixed and independent
-   of scroll — only the explode/reassemble progress is driven by it.
-   Progress is always derived from scrollY -> no drift, exact restoration.
+   Converts scroll position into a deterministic target progress value,
+   scoped to one .showcase section: 0 while that section's top edge is at
+   (or below) the viewport top, 1 once its bottom edge has been scrolled up
+   to the viewport bottom — exactly the range its sticky viewer-panel stays
+   pinned for. The caller smooths toward this target. Progress is always
+   re-derived from the section's live position -> no drift, exact restoration.
    ========================================================================== */
 class ScrollController {
-  constructor() {
+  constructor(sectionEl) {
+    this.sectionEl = sectionEl;
     this.currentProgress = 0;
     this.targetProgress = 0;
     this.smoothing = 9; // higher = snappier response to scroll
 
     this._onScroll = this._onScroll.bind(this);
-    this._onResize = this._onScroll.bind(this);
     window.addEventListener('scroll', this._onScroll, { passive: true });
-    window.addEventListener('resize', this._onResize);
+    window.addEventListener('resize', this._onScroll);
     this._onScroll();
   }
 
   _onScroll() {
-    const doc = document.documentElement;
-    const scrollableHeight = doc.scrollHeight - window.innerHeight;
-    const raw = scrollableHeight > 0 ? window.scrollY / scrollableHeight : 0;
-    this.targetProgress = Utils.clamp(raw, 0, 1);
+    const rect = this.sectionEl.getBoundingClientRect();
+    const scrollableRange = Math.max(this.sectionEl.offsetHeight - window.innerHeight, 1);
+    const scrolledIntoSection = -rect.top;
+    this.targetProgress = Utils.clamp(scrolledIntoSection / scrollableRange, 0, 1);
   }
 
   update(dt) {
@@ -583,7 +633,8 @@ class ScrollController {
   }
 
   scrollToStart() {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const top = window.scrollY + this.sectionEl.getBoundingClientRect().top;
+    window.scrollTo({ top, behavior: 'smooth' });
   }
 }
 
@@ -746,26 +797,86 @@ class ThemeManager {
 }
 
 /* ==========================================================================
-   UIManager
+   PanelUIManager
+   HUD chrome for ONE viewer panel: progress bar, instructions fade, and its
+   reset/env/fullscreen/autorotate/tools-tray buttons. Scoped to that panel's
+   own DOM subtree (via class selectors, since a page can host several
+   panels at once) rather than page-wide IDs.
    ========================================================================== */
-class UIManager {
-  constructor({ cameraController, animationManager, lightingManager, scrollController, sceneManager }) {
+class PanelUIManager {
+  constructor(panelRoot, { cameraController, lightingManager }) {
+    this.panelRoot = panelRoot;
     this.cameraController = cameraController;
-    this.animationManager = animationManager;
     this.lightingManager = lightingManager;
-    this.scrollController = scrollController;
-    this.sceneManager = sceneManager;
 
-    this.progressFill = document.getElementById('progress-fill');
-    this.progressDot = document.getElementById('progress-dot');
-    this.progressPercent = document.getElementById('progress-percent');
-    this.instructions = document.getElementById('instructions');
-    this.progressWrap = document.querySelector('.progress-wrap');
+    this.progressFill = panelRoot.querySelector('.progress-fill');
+    this.progressDot = panelRoot.querySelector('.progress-dot');
+    this.progressPercent = panelRoot.querySelector('.progress-percent');
+    this.instructions = panelRoot.querySelector('.instructions');
+    this.progressWrap = panelRoot.querySelector('.progress-wrap');
 
     this._bindButtons();
+    this._instructionsFaded = false;
+  }
+
+  _bindButtons() {
+    this.panelRoot.querySelector('.reset-btn').addEventListener('click', () => this.onResetRequested?.());
+
+    const autoBtn = this.panelRoot.querySelector('.autorotate-btn');
+    autoBtn.addEventListener('click', () => {
+      const enabled = !this.cameraController.autoRotate;
+      this.cameraController.setAutoRotate(enabled);
+      autoBtn.setAttribute('aria-pressed', String(enabled));
+    });
+
+    const envBtn = this.panelRoot.querySelector('.env-btn');
+    envBtn.addEventListener('click', () => {
+      const enabled = this.lightingManager.toggleEnvironment();
+      envBtn.setAttribute('aria-pressed', String(enabled));
+    });
+
+    const fsBtn = this.panelRoot.querySelector('.fullscreen-btn');
+    fsBtn.addEventListener('click', () => {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+      else document.exitFullscreen?.();
+    });
+
+    const toolsToggle = this.panelRoot.querySelector('.tools-toggle');
+    const toolsTray = this.panelRoot.querySelector('.tools-tray');
+    toolsToggle.addEventListener('click', () => {
+      const open = !toolsTray.classList.contains('open');
+      toolsTray.classList.toggle('open', open);
+      toolsToggle.setAttribute('aria-expanded', String(open));
+    });
+  }
+
+  updateProgressUI(progress) {
+    const pct = Math.round(progress * 100);
+    this.progressFill.style.width = `${pct}%`;
+    this.progressDot.style.left = `${pct}%`;
+    this.progressPercent.textContent = `${pct}%`;
+
+    if (progress > 0.02 && !this._instructionsFaded) {
+      this._instructionsFaded = true;
+      this.instructions.classList.add('faded');
+    } else if (progress <= 0.02 && this._instructionsFaded) {
+      this._instructionsFaded = false;
+      this.instructions.classList.remove('faded');
+    }
+  }
+}
+
+/* ==========================================================================
+   GlobalChrome
+   Page-wide UI that exists exactly once regardless of how many Experiences
+   are on the page: the full-screen menu, scroll-reveal animations, and the
+   shared error overlay.
+   ========================================================================== */
+class GlobalChrome {
+  constructor() {
     this._bindMenu();
     this._bindReveals();
-    this._instructionsFaded = false;
+    document.getElementById('error-retry-btn').addEventListener('click', () => window.location.reload());
   }
 
   _bindMenu() {
@@ -789,40 +900,7 @@ class UIManager {
     progressToggle.addEventListener('click', () => {
       const nowVisible = progressToggle.getAttribute('aria-pressed') !== 'true';
       progressToggle.setAttribute('aria-pressed', String(nowVisible));
-      this.progressWrap.classList.toggle('is-hidden', !nowVisible);
-    });
-  }
-
-  _bindButtons() {
-    document.getElementById('reset-btn').addEventListener('click', () => this.onResetRequested?.());
-
-    const autoBtn = document.getElementById('autorotate-btn');
-    autoBtn.addEventListener('click', () => {
-      const enabled = !this.cameraController.autoRotate;
-      this.cameraController.setAutoRotate(enabled);
-      autoBtn.setAttribute('aria-pressed', String(enabled));
-    });
-
-    const envBtn = document.getElementById('env-btn');
-    envBtn.addEventListener('click', () => {
-      const enabled = this.lightingManager.toggleEnvironment();
-      envBtn.setAttribute('aria-pressed', String(enabled));
-    });
-
-    const fsBtn = document.getElementById('fullscreen-btn');
-    fsBtn.addEventListener('click', () => {
-      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
-      else document.exitFullscreen?.();
-    });
-
-    document.getElementById('error-retry-btn').addEventListener('click', () => window.location.reload());
-
-    const toolsToggle = document.getElementById('tools-toggle-btn');
-    const toolsTray = document.getElementById('tools-tray');
-    toolsToggle.addEventListener('click', () => {
-      const open = !toolsTray.classList.contains('open');
-      toolsTray.classList.toggle('open', open);
-      toolsToggle.setAttribute('aria-expanded', String(open));
+      document.querySelectorAll('.progress-wrap').forEach((el) => el.classList.toggle('is-hidden', !nowVisible));
     });
   }
 
@@ -837,21 +915,6 @@ class UIManager {
       { threshold: 0.2 }
     );
     items.forEach((el) => io.observe(el));
-  }
-
-  updateProgressUI(progress) {
-    const pct = Math.round(progress * 100);
-    this.progressFill.style.width = `${pct}%`;
-    this.progressDot.style.left = `${pct}%`;
-    this.progressPercent.textContent = `${pct}%`;
-
-    if (progress > 0.02 && !this._instructionsFaded) {
-      this._instructionsFaded = true;
-      this.instructions.classList.add('faded');
-    } else if (progress <= 0.02 && this._instructionsFaded) {
-      this._instructionsFaded = false;
-      this.instructions.classList.remove('faded');
-    }
   }
 
   showError(message) {
@@ -884,57 +947,43 @@ class ResponsiveManager {
 }
 
 /* ==========================================================================
-   App — orchestration
+   Experience — orchestrates one independent scroll-driven 3D showcase
+   (its own scene, model, camera, scroll range, and panel HUD). A page can
+   host several of these side by side, each fully self-contained.
    ========================================================================== */
-class App {
-  constructor() {
-    this.canvas = document.getElementById('viewer-canvas');
-    this.loadingManager = new LoadingManager();
+class Experience {
+  constructor(sectionEl, config, loadingManager) {
+    this.sectionEl = sectionEl;
+    this.config = config;
+    this.loadingManager = loadingManager;
+    this.canvas = sectionEl.querySelector('.viewer-canvas');
+    this.panelRoot = sectionEl.querySelector('.viewer-panel');
     this.sceneManager = new SceneManager(this.canvas);
-    this.themeManager = new ThemeManager();
   }
 
   async init() {
-    try {
-      this.responsiveManager = new ResponsiveManager(this.canvas, this.sceneManager, () =>
-        this.cameraController?.reframe()
-      );
-      this.lightingManager = new LightingManager(this.sceneManager);
-      this.modelManager = new ModelManager(this.sceneManager, this.loadingManager);
-      this.cameraController = new CameraController(this.sceneManager);
+    this.responsiveManager = new ResponsiveManager(this.canvas, this.sceneManager, () =>
+      this.cameraController?.reframe()
+    );
+    this.lightingManager = new LightingManager(this.sceneManager);
+    this.modelManager = new ModelManager(this.sceneManager, this.loadingManager, this.config);
+    this.cameraController = new CameraController(this.sceneManager);
 
-      await this.modelManager.loadAll();
+    await this.modelManager.loadAll();
 
-      this.cameraController.frameToRange(this.modelManager.boundingSphere, this.modelManager.explodedBoundingSphere);
-      this.animationManager = new AnimationManager(this.modelManager);
-      this.scrollController = new ScrollController();
-      this.interactionController = new InteractionController(this.canvas, this.cameraController);
+    this.cameraController.frameToRange(this.modelManager.boundingSphere, this.modelManager.explodedBoundingSphere);
+    this.animationManager = new AnimationManager(this.modelManager);
+    this.scrollController = new ScrollController(this.sectionEl);
+    this.interactionController = new InteractionController(this.canvas, this.cameraController);
 
-      this.uiManager = new UIManager({
-        cameraController: this.cameraController,
-        animationManager: this.animationManager,
-        lightingManager: this.lightingManager,
-        scrollController: this.scrollController,
-        sceneManager: this.sceneManager,
-      });
-      this.uiManager.onResetRequested = () => this.reset();
+    this.panelUI = new PanelUIManager(this.panelRoot, {
+      cameraController: this.cameraController,
+      lightingManager: this.lightingManager,
+    });
+    this.panelUI.onResetRequested = () => this.reset();
 
-      this.sceneManager.addRenderCallback((dt) => this._tick(dt));
-      this.sceneManager.start();
-
-      this.loadingManager.complete();
-    } catch (err) {
-      console.error(err);
-      const detail = `${err?.message || err}${err?.stack ? '\n\n' + err.stack : ''}`;
-      this.uiManager?.showError?.(detail) ?? this._showFallbackError(detail);
-    }
-  }
-
-  _showFallbackError(message) {
-    document.getElementById('loading-overlay').classList.add('hidden');
-    const overlay = document.getElementById('error-overlay');
-    overlay.hidden = false;
-    if (message) document.getElementById('error-message').textContent = message;
+    this.sceneManager.addRenderCallback((dt) => this._tick(dt));
+    this.sceneManager.start();
   }
 
   _tick(dt) {
@@ -942,7 +991,7 @@ class App {
     this.animationManager.setProgress(progress);
     this.cameraController.setExplodeRadius(progress);
     this.cameraController.update(dt);
-    this.uiManager.updateProgressUI(progress);
+    this.panelUI.updateProgressUI(progress);
 
     // Tactile "grab" feedback: the model eases to a slightly smaller scale
     // while actively being dragged, and springs back to normal on release.
@@ -960,6 +1009,36 @@ class App {
     this.animationManager.resetAnimation();
     this.scrollController.currentProgress = 0;
     this.scrollController.targetProgress = 0;
+  }
+}
+
+/* ==========================================================================
+   App — creates one Experience per EXPERIENCE_CONFIGS entry, sharing a
+   single loading bar, theme toggle, and page-wide chrome across all of them.
+   ========================================================================== */
+class App {
+  constructor() {
+    const loadingKeys = EXPERIENCE_CONFIGS.flatMap((c) => Object.values(c.loadingKeys));
+    this.loadingManager = new LoadingManager(loadingKeys);
+    this.themeManager = new ThemeManager();
+    this.globalChrome = new GlobalChrome();
+  }
+
+  async init() {
+    try {
+      this.experiences = EXPERIENCE_CONFIGS.map((config) => {
+        const sectionEl = document.getElementById(config.sectionId);
+        return new Experience(sectionEl, config, this.loadingManager);
+      });
+
+      await Promise.all(this.experiences.map((exp) => exp.init()));
+
+      this.loadingManager.complete();
+    } catch (err) {
+      console.error(err);
+      const detail = `${err?.message || err}${err?.stack ? '\n\n' + err.stack : ''}`;
+      this.globalChrome.showError(detail);
+    }
   }
 }
 

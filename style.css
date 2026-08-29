@@ -186,7 +186,10 @@ button{ font-family:inherit; cursor:pointer; }
 }
 
 /* ==========================================================================
-   Layout — fixed 3D panel on the right, scrolling content on the left
+   Layout — each .showcase is its own scroll-driven section: a sticky 3D
+   panel on the right pinned for the duration of that section's own content
+   column, then released once the section scrolls past. Two (or more)
+   showcases can sit stacked on the page, each independently scroll-driven.
    ========================================================================== */
 :root{
   --panel-w: 46vw;
@@ -196,19 +199,20 @@ button{ font-family:inherit; cursor:pointer; }
      content column when rotated or dragged toward it */
   --viewer-bleed: clamp(60px, 9vw, 220px);
 }
-.layout{ display:flex; align-items:flex-start; }
+.showcase{ display:flex; align-items:flex-start; }
+.showcase:first-of-type .content-col{ padding-top: var(--header-h); }
 
 .content-col{
   width: calc(100% - var(--panel-w));
   min-width: 0;
-  padding-top: var(--header-h);
 }
 
 .viewer-panel{
-  position:fixed; top:0; right:0;
+  position:sticky; top:0;
   width:var(--panel-w); min-width:var(--panel-w-min);
   height:100svh;
   overflow:visible;
+  flex-shrink:0;
   /* plain --bg (matching <body>'s own background) rather than a distinct
      panel tint, so the canvas bleeding past the panel's left edge blends
      into one continuous background instead of a visible seam */
@@ -230,9 +234,13 @@ button{ font-family:inherit; cursor:pointer; }
 
 @media (max-width:900px){
   :root{ --panel-w: 100vw; --panel-w-min: 0px; --viewer-bleed: 0px; }
-  .layout{ flex-direction:column; }
-  .content-col{ width:100%; padding-top:calc(46svh + 8px); }
-  .viewer-panel{ height:46svh; overflow:hidden; border-bottom:1px solid var(--line); }
+  .showcase{ flex-direction:column; }
+  /* the 3D panel reads above the text on mobile — reorder visually rather
+     than in the DOM, so the sticky panel still pins/releases correctly
+     against its own section's scroll range */
+  .viewer-panel{ order:1; height:46svh; overflow:hidden; border-bottom:1px solid var(--line); }
+  .content-col{ order:2; width:100%; padding-top:8px; }
+  .showcase:first-of-type .content-col{ padding-top:8px; }
   .hud{
     justify-content:flex-start; gap:10px;
     padding-top:calc(var(--header-h) - 30px);
@@ -415,8 +423,16 @@ button{ font-family:inherit; cursor:pointer; }
 }
 
 /* ==========================================================================
-   Deploy / outro
+   Deploy / outro (shared, after every showcase)
    ========================================================================== */
+.outro-col{
+  /* at least one full viewport tall, so the last showcase's sticky panel
+     always has enough trailing scroll room to fully release before the
+     page ends, instead of lingering alongside this shorter content */
+  min-height:100vh;
+  display:flex; flex-direction:column; justify-content:center;
+}
+
 .deploy-section{
   padding:100px clamp(20px,5vw,56px) 140px;
   text-align:center;
