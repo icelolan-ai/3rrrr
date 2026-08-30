@@ -955,8 +955,8 @@ class PhysicsLayer {
         x: Math.random() * this.width,
         y: Math.random() * this.height,
         r: Utils.lerp(0.7, 2.1, Math.random()),
-        vx: (Math.random() - 0.5) * 7,
-        vy: (Math.random() - 0.5) * 7 - 2.2, // gentle upward drift, like dust
+        vx: (Math.random() - 0.5) * 9.5,
+        vy: (Math.random() - 0.5) * 9.5 - 2.8, // gentle upward drift, like dust
         alpha: Utils.lerp(0.1, 0.32, Math.random()),
         accent: Math.random() < 0.3, // a minority tinted with the site's accent red
       });
@@ -1023,7 +1023,7 @@ class PhysicsBackground {
     pageCanvas.id = 'physics-bg-canvas';
     document.body.prepend(pageCanvas);
     const pageWide = window.innerWidth >= 700;
-    this.pageLayer = new PhysicsLayer(pageCanvas, { particleCount: pageWide ? 130 : 65 });
+    this.pageLayer = new PhysicsLayer(pageCanvas, { particleCount: pageWide ? 195 : 98 });
     this.layers = [this.pageLayer];
 
     // The panel's own canvas (see .viewer-bg-canvas in style.css) — gives
@@ -1034,7 +1034,7 @@ class PhysicsBackground {
     if (panelCanvas && panelEl) {
       const panelWide = panelEl.getBoundingClientRect().width >= 700;
       this.panelLayer = new PhysicsLayer(panelCanvas, {
-        particleCount: panelWide ? 50 : 32,
+        particleCount: panelWide ? 75 : 48,
         boundsEl: panelEl,
         withRipple: true,
       });
