@@ -34,6 +34,14 @@
   --hud-ink: #f7f5f5;
   --hud-ink-dim: #d9d1d2;
   --hud-ink-faint: #b9adae;
+
+  /* Studio-light page backdrop (see body, below): a few soft colored glows
+     behind the text — like gelled studio spotlights against a black
+     cyclorama — plus a vignette that gently darkens toward the page edges. */
+  --studio-glow-1: rgba(168,85,247,.16); /* violet */
+  --studio-glow-2: rgba(255,45,59,.14);  /* red */
+  --studio-glow-3: rgba(56,130,255,.13); /* blue */
+  --studio-vignette: rgba(0,0,0,.55);
 }
 
 /* ==========================================================================
@@ -55,6 +63,13 @@
 
   --hud-bg: rgba(224,18,31,.85);
   --hud-border: rgba(255,255,255,.28);
+
+  /* light theme keeps the studio backdrop white/red-toned rather than
+     neon violet/blue, and a much softer vignette to suit a white page */
+  --studio-glow-1: rgba(224,18,31,.07);
+  --studio-glow-2: rgba(224,18,31,.10);
+  --studio-glow-3: rgba(224,18,31,.05);
+  --studio-vignette: rgba(30,10,12,.08);
 }
 
 *,*::before,*::after{ box-sizing:border-box; }
@@ -69,7 +84,17 @@ body{ max-width:100%; }
 
 body{
   margin:0;
-  background:var(--bg);
+  /* studio-light backdrop: a few soft colored glows (violet/red/blue in
+     dark, white/red in light) plus a vignette darkening toward the edges —
+     sits behind the content column; the 3D viewer panel keeps its own
+     solid --bg fill on top so this never shows through behind the cube. */
+  background:
+    radial-gradient(ellipse 60% 50% at 12% 18%, var(--studio-glow-1), transparent 60%),
+    radial-gradient(ellipse 55% 45% at 88% 12%, var(--studio-glow-2), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 50% 96%, var(--studio-glow-3), transparent 60%),
+    radial-gradient(ellipse 120% 100% at 50% 50%, transparent 55%, var(--studio-vignette) 100%),
+    var(--bg);
+  background-attachment:fixed;
   color:var(--ink);
   font-family:"Inter","Noto Sans Thai","Helvetica Neue",Arial,sans-serif;
   -webkit-font-smoothing:antialiased;
