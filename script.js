@@ -13,7 +13,6 @@
      PanelUIManager                per-panel HUD, reset button, progress bar
      ResponsiveManager             resize / orientation / DPR handling
      ThemeManager                  shared dark/light site theme toggle
-     RippleEffect                  tap/scroll water-ripple text distortion
      GlobalChrome                  shared menu, reveals, error overlay
      MasterExperience               the whole journey: Ghost -> 3D transition
                                      -> Rubik's Cube -> explode, one scene
@@ -884,70 +883,16 @@ class PanelUIManager {
 }
 
 /* ==========================================================================
-   RippleEffect
-   Tapping/clicking or scrolling anywhere on the page — except inside the 3D
-   viewer panel, where that gesture already means "rotate the cube" — briefly
-   warps the page's text content with an SVG displacement-map filter (defined
-   in index.html), like a ripple of water passing across the whole screen.
-   Throttled so a continuous scroll/drag doesn't retrigger every event, and
-   skipped entirely for prefers-reduced-motion.
-   ========================================================================== */
-class RippleEffect {
-  constructor() {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-    this.displacement = document.getElementById('ripple-displacement');
-    this._raf = null;
-    this._lastTrigger = 0;
-    this._throttleMs = 350;
-    this._durationMs = 750;
-    this._peakScale = 22;
-
-    const trigger = (e) => this._maybeTrigger(e);
-    document.addEventListener('pointerdown', trigger, { passive: true });
-    window.addEventListener('wheel', trigger, { passive: true });
-    window.addEventListener('touchmove', trigger, { passive: true });
-  }
-
-  _maybeTrigger(e) {
-    if (e.target.closest?.('.viewer-panel')) return; // excludes the cube itself
-    const now = performance.now();
-    if (now - this._lastTrigger < this._throttleMs) return;
-    this._lastTrigger = now;
-    this._play();
-  }
-
-  _play() {
-    const start = performance.now();
-    cancelAnimationFrame(this._raf);
-
-    const tick = (now) => {
-      const t = Utils.clamp((now - start) / this._durationMs, 0, 1);
-      // quick rise, slower decay back to flat — reads as one ripple passing through
-      const envelope = t < 0.15 ? t / 0.15 : 1 - (t - 0.15) / 0.85;
-      this.displacement.setAttribute('scale', String(Math.max(envelope, 0) * this._peakScale));
-      if (t < 1) {
-        this._raf = requestAnimationFrame(tick);
-      } else {
-        this.displacement.setAttribute('scale', '0');
-      }
-    };
-    this._raf = requestAnimationFrame(tick);
-  }
-}
-
-/* ==========================================================================
    GlobalChrome
    Page-wide UI that exists exactly once regardless of how many Experiences
-   are on the page: the full-screen menu, scroll-reveal animations, the
-   tap/scroll ripple effect, and the shared error overlay.
+   are on the page: the full-screen menu, scroll-reveal animations, and the
+   shared error overlay.
    ========================================================================== */
 class GlobalChrome {
   constructor() {
     this._renderMath();
     this._bindMenu();
     this._bindReveals();
-    this.rippleEffect = new RippleEffect();
     document.getElementById('error-retry-btn').addEventListener('click', () => window.location.reload());
   }
 
