@@ -1069,6 +1069,7 @@ class MasterExperience {
     this._phase = 'ghost';
     this._framedFor = null;
     this._grabScale = 1;
+    this._transitionBase = null;
   }
 
   async init() {
@@ -1164,9 +1165,14 @@ class MasterExperience {
       this._liveGhostPose = this._capturePose();
       this.panelUI.updateProgressUI(t);
     } else if (phase === 'transition') {
-      if (this.interactionController.isDragging) this.interactionController.isDragging = false;
-      this.interactionController.enabled = false;
-      this.cameraController.cancelFling();
+      // Orbit/zoom stay live through the transition too: rather than hard-
+      // setting an absolute pose every frame (which would silently overwrite
+      // any drag/zoom the instant the next frame's scripted value lands),
+      // only the FRAME-TO-FRAME CHANGE in the scripted pan is applied as a
+      // delta on top of the camera's existing target theta/phi/radius — so
+      // the scroll-driven pan and live user input add together instead of
+      // one discarding the other.
+      this.interactionController.enabled = true;
 
       this.ghostModel.root.visible = true;
       this.rubikModel.root.visible = true;
@@ -1184,11 +1190,29 @@ class MasterExperience {
 
       const from = this._liveGhostPose;
       const to = this._rubikDefaultPose;
-      const theta = Utils.lerp(Utils.wrapAngleNear(from.theta, to.theta), to.theta, eased);
-      const phi = Utils.lerp(from.phi, to.phi, eased);
-      const radius = Utils.lerp(from.radius, to.radius, eased);
-      const target = from.target.clone().lerp(to.target, eased);
-      this.cameraController.setPose(theta, phi, radius, target);
+      const scriptedTheta = Utils.lerp(Utils.wrapAngleNear(from.theta, to.theta), to.theta, eased);
+      const scriptedPhi = Utils.lerp(from.phi, to.phi, eased);
+      const scriptedRadius = Utils.lerp(from.radius, to.radius, eased);
+      const scriptedTarget = from.target.clone().lerp(to.target, eased);
+      const cam = this.cameraController;
+
+      if (!this._transitionBase) {
+        // first frame entering the transition (from either direction) —
+        // anchor here so the pan starts exactly where the camera already
+        // is, no snap.
+        this._transitionBase = { theta: scriptedTheta, phi: scriptedPhi, radius: scriptedRadius };
+      } else {
+        cam.targetTheta += scriptedTheta - this._transitionBase.theta;
+        cam.targetPhi = Utils.clamp(cam.targetPhi + (scriptedPhi - this._transitionBase.phi), cam.minPhi, cam.maxPhi);
+        cam.targetRadius = Utils.clamp(
+          cam.targetRadius + (scriptedRadius - this._transitionBase.radius),
+          cam.minRadius,
+          cam.maxRadius
+        );
+        this._transitionBase = { theta: scriptedTheta, phi: scriptedPhi, radius: scriptedRadius };
+      }
+      cam.target.copy(scriptedTarget);
+      cam.update(dt);
 
       this._framedFor = null; // re-frame once we land on either side
       this.panelUI.updateProgressUI(0);
@@ -1217,6 +1241,7 @@ class MasterExperience {
       this.panelUI.updateProgressUI(t);
     }
 
+    if (phase !== 'transition') this._transitionBase = null;
     this._phase = phase;
   }
 
