@@ -245,6 +245,16 @@ class ModelManager {
     this.parts = new Map();
     this.boundingBox = new THREE.Box3();
     this.boundingSphere = new THREE.Sphere();
+    // every mesh material in this model, so a whole model's opacity can be
+    // faded as one (three.js has no group-level opacity) — see setOpacity()
+    this.materials = [];
+  }
+
+  /** Fades this entire model's opacity (0-1). Materials are marked
+   *  `transparent` once up front (see _buildDisplayModel) so this never
+   *  needs a shader recompile mid-animation. */
+  setOpacity(opacity) {
+    for (const mat of this.materials) mat.opacity = opacity;
   }
 
   async loadAll() {
@@ -297,7 +307,12 @@ class ModelManager {
           obj.material.metalness = 0.85;
           obj.material.roughness = Utils.clamp(obj.material.roughness ?? 0.3, 0.15, 0.35);
           obj.material.envMapIntensity = 1.35;
+          // Always transparent (even at opacity 1, which renders identically
+          // to opaque) so setOpacity() can fade the model later without a
+          // shader recompile.
+          obj.material.transparent = true;
           obj.material.needsUpdate = true;
+          this.materials.push(obj.material);
         }
       }
     });
@@ -692,8 +707,8 @@ class InteractionController {
     // Touch: always rotate with one finger, pinch-zoom with two.
     this.canvas.addEventListener('touchstart', (e) => this._onTouchStart(e), { passive: true });
     this.canvas.addEventListener('touchmove', (e) => this._onTouchMove(e), { passive: false });
-    this.canvas.addEventListener('touchend', () => this._onTouchEnd());
-    this.canvas.addEventListener('touchcancel', () => this._onTouchEnd());
+    this.canvas.addEventListener('touchend', (e) => this._onTouchEnd(e));
+    this.canvas.addEventListener('touchcancel', (e) => this._onTouchEnd(e));
   }
 
   _activeTouches() {
@@ -712,6 +727,7 @@ class InteractionController {
 
   _onTouchMove(e) {
     if (!this.enabled) return;
+    const prevCount = this._touchCount;
     this._touchCount = e.touches.length;
     if (e.touches.length === 2) {
       e.preventDefault();
@@ -723,13 +739,28 @@ class InteractionController {
         this.cameraController.maxRadius
       );
       this.cameraController.markUserZoomed();
+    } else if (e.touches.length === 1 && prevCount >= 2) {
+      // A pinch just dropped to one remaining finger — resume single-finger
+      // drag from here instead of requiring a full lift + fresh touch, and
+      // re-anchor _lastX/Y so it doesn't jump using stale coordinates from
+      // before the pinch started.
+      this.isDragging = true;
+      this._lastX = e.touches[0].clientX;
+      this._lastY = e.touches[0].clientY;
+      this._lastDx = 0;
+      this._lastDy = 0;
     }
     // single-finger drag is already handled via pointermove above; the
     // panel is fixed so it never needs to release the gesture to the page.
   }
 
-  _onTouchEnd() {
-    this._touchCount = 0;
+  _onTouchEnd(e) {
+    // Track the touches actually still down (not hard-reset to 0), so
+    // lifting one finger out of a two-finger pinch doesn't get mistaken for
+    // every finger having lifted — that previously left single-finger drag
+    // unable to resume until the whole gesture was released and restarted.
+    this._touchCount = e.touches.length;
+    if (this._touchCount === 0) this.isDragging = false;
   }
 
   _touchDistance(touches) {
@@ -951,8 +982,11 @@ class ResponsiveManager {
 /* ==========================================================================
    MasterScrollController
    Converts ONE continuous page scroll into a phase + local progress, using
-   three invisible marker elements to split the single #main-showcase section
-   into four ranges: 'ghost' -> 'transition' -> 'rubikText' -> 'explode'.
+   two invisible marker elements to split the single #main-showcase section
+   into three ranges: 'ghost' -> 'transition' -> 'rubik'. Each cube's own
+   explode is driven directly by its own phase's local progress (scrolling
+   through that cube's hero+physics content both reveals the text AND
+   explodes the pieces, exactly like reading through it "breaks it apart").
    Marker-to-section distances are measured via getBoundingClientRect, which
    stays scroll-invariant (both move by the same amount), so no document-flow
    offset math is needed. Recomputed on every scroll/resize, so it stays
@@ -961,11 +995,11 @@ class ResponsiveManager {
 class MasterScrollController {
   constructor(sectionEl, markers) {
     this.sectionEl = sectionEl;
-    this.markers = markers; // { ghostEnd, transitionEnd, rubikTextEnd }
+    this.markers = markers; // { ghostEnd, transitionEnd }
     this.smoothing = 9;
     this.smoothedGlobal = 0;
     this.targetGlobal = 0;
-    this._bounds = { d1: 1, d2: 2, d3: 3, d4: 4 };
+    this._bounds = { d1: 1, d2: 2, d3: 3 };
     this.current = { phase: 'ghost', t: 0, global: 0 };
 
     this._onScroll = this._onScroll.bind(this);
@@ -978,17 +1012,16 @@ class MasterScrollController {
     const sectionRect = this.sectionEl.getBoundingClientRect();
     const d1 = this.markers.ghostEnd.getBoundingClientRect().top - sectionRect.top;
     const d2 = this.markers.transitionEnd.getBoundingClientRect().top - sectionRect.top;
-    const d3 = this.markers.rubikTextEnd.getBoundingClientRect().top - sectionRect.top;
-    const d4 = Math.max(this.sectionEl.offsetHeight - window.innerHeight, d3 + 1);
-    this._bounds = { d1, d2, d3, d4 };
-    this.targetGlobal = Utils.clamp(-sectionRect.top, 0, d4);
+    const d3 = Math.max(this.sectionEl.offsetHeight - window.innerHeight, d2 + 1);
+    this._bounds = { d1, d2, d3 };
+    this.targetGlobal = Utils.clamp(-sectionRect.top, 0, d3);
   }
 
   update(dt) {
     this.smoothedGlobal = Utils.damp(this.smoothedGlobal, this.targetGlobal, this.smoothing, dt);
     if (Math.abs(this.smoothedGlobal - this.targetGlobal) < 0.05) this.smoothedGlobal = this.targetGlobal;
 
-    const { d1, d2, d3, d4 } = this._bounds;
+    const { d1, d2, d3 } = this._bounds;
     const s = this.smoothedGlobal;
     let phase, t;
     if (s <= d1) {
@@ -997,12 +1030,9 @@ class MasterScrollController {
     } else if (s <= d2) {
       phase = 'transition';
       t = d2 > d1 ? (s - d1) / (d2 - d1) : 1;
-    } else if (s <= d3) {
-      phase = 'rubikText';
-      t = d3 > d2 ? (s - d2) / (d3 - d2) : 1;
     } else {
-      phase = 'explode';
-      t = d4 > d3 ? (s - d3) / (d4 - d3) : 1;
+      phase = 'rubik';
+      t = d3 > d2 ? (s - d2) / (d3 - d2) : 1;
     }
     this.current = { phase, t: Utils.clamp(t, 0, 1), global: s };
     return this.current;
@@ -1011,10 +1041,11 @@ class MasterScrollController {
 
 /* ==========================================================================
    MasterExperience — the entire scroll-driven journey as ONE shared Three.js
-   scene/camera/canvas: Ghost Cube (orbit only) -> a literal 3D transition
-   where both models coexist and the camera pans between them -> Rubik's
-   Cube (orbit only) -> the Rubik's Cube's own explode/reassemble at the very
-   end. Everything is a pure function of one continuous scroll progress, so
+   scene/camera/canvas: the Ghost Cube orbits and explodes/reassembles as its
+   own physics text scrolls by -> a literal 3D transition where both models
+   coexist and the camera pans between them -> the Rubik's Cube orbits and
+   explodes/reassembles the same way as its own physics text scrolls by.
+   Everything is a pure function of one continuous scroll progress, so
    scrolling back up reverses the whole sequence exactly.
    ========================================================================== */
 class MasterExperience {
@@ -1067,7 +1098,6 @@ class MasterExperience {
     this.scrollController = new MasterScrollController(this.sectionEl, {
       ghostEnd: document.getElementById('marker-ghost-end'),
       transitionEnd: document.getElementById('marker-transition-end'),
-      rubikTextEnd: document.getElementById('marker-rubik-text-end'),
     });
 
     this.panelUI = new PanelUIManager(this.panelRoot, {
@@ -1111,13 +1141,17 @@ class MasterExperience {
 
       this.ghostModel.root.visible = true;
       this.rubikModel.root.visible = false;
-      this.ghostAnim.setProgress(0);
+      this.ghostModel.setOpacity(1);
+      // Explode ties directly to scrolling through the Ghost Cube's own
+      // hero+physics content — reading through it visibly breaks it apart.
+      this.ghostAnim.setProgress(t);
       this.ghostModel.root.scale.setScalar(this._grabScale);
 
       this.interactionController.enabled = true;
+      this.cameraController.setExplodeRadius(t);
       this.cameraController.update(dt);
       this._liveGhostPose = this._capturePose();
-      this.panelUI.updateProgressUI(0);
+      this.panelUI.updateProgressUI(t);
     } else if (phase === 'transition') {
       if (this.interactionController.isDragging) this.interactionController.isDragging = false;
       this.interactionController.enabled = false;
@@ -1127,10 +1161,12 @@ class MasterExperience {
       this.rubikModel.root.visible = true;
 
       const eased = Utils.easeInOutCubic(t);
-      // The blue cube "expands wide" — reuses its own assembled->exploded
-      // piece animation as the literal expansion — while the red cube grows
-      // from nothing at the shared center out to full size.
-      this.ghostAnim.setProgress(t);
+      // Ghost is already fully exploded (from the ghost phase above) — here
+      // it just fades away as the red cube grows into view at the shared
+      // center, instead of snapping to hidden the instant Rubik's Cube phase
+      // begins.
+      this.ghostAnim.setProgress(1);
+      this.ghostModel.setOpacity(1 - eased);
       this.ghostModel.root.scale.setScalar(1);
       this.rubikModel.root.scale.setScalar(Utils.lerp(0.001, 1, eased));
       this.rubikAnim.setProgress(0);
@@ -1146,7 +1182,8 @@ class MasterExperience {
       this._framedFor = null; // re-frame once we land on either side
       this.panelUI.updateProgressUI(0);
     } else {
-      // 'rubikText' or 'explode'
+      // 'rubik' — orbit-able, and its own explode ties to scrolling through
+      // its own hero+physics content, same as the Ghost Cube above.
       if (this._framedFor !== 'rubik') {
         this.cameraController.frameToRange(this.rubikModel.boundingSphere, this.rubikModel.explodedBoundingSphere);
         this.cameraController.setPose(
@@ -1163,11 +1200,10 @@ class MasterExperience {
       this.rubikModel.root.scale.setScalar(this._grabScale);
 
       this.interactionController.enabled = true;
-      const explodeProgress = phase === 'explode' ? t : 0;
-      this.rubikAnim.setProgress(explodeProgress);
-      this.cameraController.setExplodeRadius(explodeProgress);
+      this.rubikAnim.setProgress(t);
+      this.cameraController.setExplodeRadius(t);
       this.cameraController.update(dt);
-      this.panelUI.updateProgressUI(explodeProgress);
+      this.panelUI.updateProgressUI(t);
     }
 
     this._phase = phase;
