@@ -1275,11 +1275,15 @@ class PanelUIManager {
    scrolling page text. Reads `window.__rubricExplode` — a plain 0..1 number
    MasterExperience updates every tick — to gently speed the particles up
    while a cube is mid-explosion, without any tighter coupling to the 3D
-   scene itself. Deliberately does NOT run inside the always-opaque
-   .viewer-panel (where the cube itself sits) — that panel used to host its
-   own local instance of this dust, but it read as particles drifting out of
-   the cube, so it was removed; the panel now stays a plain backdrop. Skipped
-   entirely for prefers-reduced-motion.
+   scene itself. Deliberately does NOT render inside the .viewer-panel
+   (where the cube itself sits) — that panel used to host its own local
+   instance of this dust, but it read as particles drifting out of the
+   cube, so it was removed. The panel's live rect is also clipped out of
+   this page-wide layer's draw every frame (rather than just trusting the
+   panel's own opaque CSS background to paint over it), since that
+   compositing wasn't reliable on every mobile browser and let dust bleed
+   through around the cube anyway. Skipped entirely for
+   prefers-reduced-motion.
    ========================================================================== */
 /** A dust-particle field drawn into its own canvas. */
 class PhysicsLayer {
@@ -1338,9 +1342,27 @@ class PhysicsLayer {
     }
   }
 
-  draw(accentColor, neutralColor) {
+  /** excludeRect, if given (viewport coordinates, same space as
+   *  getBoundingClientRect()), is clipped out before any particle is
+   *  drawn — used to keep this page-wide dust from ever rendering behind
+   *  the 3D viewer panel, regardless of whether the panel's own opaque
+   *  background actually paints over it (some mobile browsers have been
+   *  unreliable about compositing a `background-attachment:fixed` panel
+   *  over a `position:fixed` canvas, which let dust bleed through around
+   *  the cube). Clipping here is correct independent of any such paint-
+   *  order/engine quirk, since it happens before pixels ever land in the
+   *  canvas at all. */
+  draw(accentColor, neutralColor, excludeRect) {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
+
+    ctx.save();
+    if (excludeRect) {
+      ctx.beginPath();
+      ctx.rect(0, 0, this.width, this.height);
+      ctx.rect(excludeRect.x, excludeRect.y, excludeRect.width, excludeRect.height);
+      ctx.clip('evenodd');
+    }
 
     // Accent-tinted particles brighten as the cube explodes (same signal
     // driving --explode-intensity in style.css), so the particle field and
@@ -1355,6 +1377,7 @@ class PhysicsLayer {
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
   }
 }
 
@@ -1369,6 +1392,12 @@ class PhysicsBackground {
     this.pageLayer = new PhysicsLayer(pageCanvas, { particleCount: pageWide ? 195 : 98, dimFactor: 0.35 });
     this.layers = [this.pageLayer];
 
+    // The 3D viewer panel is meant to stay a plain backdrop for the cube —
+    // this excludes its live on-screen rect from the page-wide dust every
+    // frame (see PhysicsLayer.draw) rather than trusting the panel's own
+    // opaque CSS background to always paint over the dust underneath it.
+    this._excludeEl = document.querySelector('.viewer-panel');
+
     window.addEventListener('resize', () => this.pageLayer.resize());
 
     let lastTime = performance.now();
@@ -1378,9 +1407,10 @@ class PhysicsBackground {
       const explode = window.__rubricExplode || 0;
       const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-glow').trim();
       const neutralColor = getComputedStyle(document.documentElement).getPropertyValue('--ink-faint').trim();
+      const excludeRect = this._excludeEl ? this._excludeEl.getBoundingClientRect() : null;
       for (const layer of this.layers) {
         layer.update(dt, explode);
-        layer.draw(accentColor, neutralColor);
+        layer.draw(accentColor, neutralColor, excludeRect);
       }
       requestAnimationFrame(tick);
     };
