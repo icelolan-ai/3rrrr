@@ -51,6 +51,13 @@
     radial-gradient(ellipse 60% 50% at 50% 96%, var(--studio-glow-3), transparent 60%),
     radial-gradient(ellipse 120% 100% at 50% 50%, transparent 55%, var(--studio-vignette) 100%),
     var(--bg);
+
+  /* Very faint static dot-grid texture, layered on top of the studio
+     backdrop (see body::before / .viewer-panel::before, below) — a subtle
+     print-halftone touch underneath the physics particles, not a focal
+     pattern of its own. */
+  --dot-color: rgba(255,255,255,.14);
+  --dot-bg: radial-gradient(var(--dot-color) 0.6px, transparent 1px) 0 0/34px 34px;
 }
 
 /* ==========================================================================
@@ -79,6 +86,9 @@
   --studio-glow-2: rgba(224,18,31,.10);
   --studio-glow-3: rgba(224,18,31,.05);
   --studio-vignette: rgba(30,10,12,.08);
+
+  /* dot-grid reads dark-on-white here instead of light-on-black */
+  --dot-color: rgba(20,10,12,.07);
 }
 
 *,*::before,*::after{ box-sizing:border-box; }
@@ -119,6 +129,18 @@ body{
   pointer-events:none;
   width:100%;
   height:100%;
+}
+
+/* Faint static dot-grid (see --dot-bg above) underneath the physics
+   particles — fixed to the viewport like the rest of the backdrop, no
+   motion or interactivity of its own, just a quiet halftone texture. */
+body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  background:var(--dot-bg);
+  background-attachment:fixed;
 }
 
 img,canvas{ display:block; max-width:100%; }
@@ -272,6 +294,17 @@ button{ font-family:inherit; cursor:pointer; }
   background:var(--studio-bg);
   background-attachment:fixed;
   z-index:10;
+}
+/* Same faint dot-grid as body::before, painted here too since the opaque
+   panel background above would otherwise hide it — fixed positioning
+   keeps it lined up pixel-for-pixel with body's own copy. */
+.viewer-panel::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:var(--dot-bg);
+  background-attachment:fixed;
 }
 /* Panel-local twin of #physics-bg-canvas (see PhysicsBackground in
    script.js). .viewer-panel must stay opaque (see above), which also
