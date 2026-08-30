@@ -458,7 +458,7 @@ class CameraController {
 
     this.zoomDamping = 8;
 
-    this.autoRotate = false;
+    this.autoRotate = true;
     this.autoRotateSpeed = 0.12;
 
     // Once the user manually zooms (pinch or ctrl/shift+wheel), the
