@@ -10,6 +10,7 @@
      AnimationManager           progress -> per-cubelet transform interpolation
      MasterScrollController      one continuous scroll -> phase + progress
      InteractionController        drag rotate / pinch zoom / gesture gating
+     PieceHoverLabel                raycasts on hover, labels the piece type
      PanelUIManager                per-panel HUD, reset button, progress bar
      ResponsiveManager             resize / orientation / DPR handling
      ThemeManager                  shared dark/light site theme toggle
@@ -785,6 +786,125 @@ class InteractionController {
 }
 
 /* ==========================================================================
+   PieceHoverLabel
+   Hovering an individual cube piece raycasts against whichever model is
+   currently on screen and shows a small floating label classifying it —
+   Corner / Edge / Center / Core — derived purely from its GLB node name's
+   "_x_y_z" coordinate suffix (shared by both the Ghost and Rubik models),
+   ties the hover interaction back to the piece-geometry language already
+   used in the physics text next to the viewer. Mouse/fine-pointer only
+   (gated behind `(hover:hover) and (pointer:fine)`) — touch already uses
+   the same gesture space for drag-to-rotate, so hovering is left alone
+   there rather than fighting or duplicating it.
+   ========================================================================== */
+class PieceHoverLabel {
+  constructor(sceneManager, panelRoot, { interactionController, getActiveModel }) {
+    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+
+    this.sceneManager = sceneManager;
+    this.interactionController = interactionController;
+    this.getActiveModel = getActiveModel;
+    this.raycaster = new THREE.Raycaster();
+    this.pointerNdc = new THREE.Vector2();
+    this._hasPointer = false;
+
+    this.label = document.createElement('div');
+    this.label.className = 'piece-hover-label';
+    panelRoot.appendChild(this.label);
+
+    sceneManager.canvas.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse') return;
+      const canvasRect = sceneManager.canvas.getBoundingClientRect();
+      this.pointerNdc.x = ((e.clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
+      this.pointerNdc.y = -((e.clientY - canvasRect.top) / canvasRect.height) * 2 + 1;
+      this._hasPointer = true;
+      this._clientX = e.clientX;
+      this._clientY = e.clientY;
+      this._panelRect = panelRoot.getBoundingClientRect();
+    });
+    sceneManager.canvas.addEventListener('pointerleave', () => {
+      this._hasPointer = false;
+      this._hide();
+    });
+
+    sceneManager.addRenderCallback(() => this._update());
+  }
+
+  _hide() {
+    this.label.classList.remove('is-visible');
+  }
+
+  /** Coordinate range (min/max across every piece's xyz) differs between
+   *  the two models — Ghost uses -1/0/1, Rubik uses 0/1/2 — but "the
+   *  middle value" is always their arithmetic mean, so this stays generic
+   *  instead of hardcoding either model's numbering. Cached on the model
+   *  itself since it never changes after load. */
+  _coordRangeFor(model) {
+    if (model._pieceCoordRange) return model._pieceCoordRange;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const key of model.parts.keys()) {
+      const match = /_(-?\d+)_(-?\d+)_(-?\d+)$/.exec(key);
+      if (!match) continue;
+      for (let i = 1; i <= 3; i++) {
+        const v = Number(match[i]);
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+    }
+    model._pieceCoordRange = { min, max };
+    return model._pieceCoordRange;
+  }
+
+  _findPieceName(model, object3D) {
+    let obj = object3D;
+    while (obj) {
+      if (model.parts.has(obj.name)) return obj.name;
+      obj = obj.parent;
+    }
+    return null;
+  }
+
+  _classify(model, name) {
+    const match = /_(-?\d+)_(-?\d+)_(-?\d+)$/.exec(name);
+    if (!match) return null;
+    const { min, max } = this._coordRangeFor(model);
+    const mid = (min + max) / 2;
+    const extremeCount = [1, 2, 3].filter((i) => Number(match[i]) !== mid).length;
+    if (extremeCount === 3) return 'มุม · Corner';
+    if (extremeCount === 2) return 'ขอบ · Edge';
+    if (extremeCount === 1) return 'กลางหน้า · Center';
+    return 'แกนกลาง · Core';
+  }
+
+  _update() {
+    if (!this._hasPointer || this.interactionController.isDragging) {
+      this._hide();
+      return;
+    }
+    const model = this.getActiveModel();
+    if (!model) {
+      this._hide();
+      return;
+    }
+
+    this.raycaster.setFromCamera(this.pointerNdc, this.sceneManager.camera);
+    const hits = this.raycaster.intersectObject(model.root, true);
+    const pieceName = hits.length ? this._findPieceName(model, hits[0].object) : null;
+    const label = pieceName ? this._classify(model, pieceName) : null;
+    if (!label) {
+      this._hide();
+      return;
+    }
+
+    this.label.textContent = label;
+    this.label.style.left = `${this._clientX - this._panelRect.left + 14}px`;
+    this.label.style.top = `${this._clientY - this._panelRect.top + 14}px`;
+    this.label.classList.add('is-visible');
+  }
+}
+
+/* ==========================================================================
    ThemeManager
    Toggles the site's tone between the default dark theme and a white/red
    light theme. The <html data-theme="light"> attribute (applied instantly
@@ -955,8 +1075,8 @@ class PhysicsLayer {
         x: Math.random() * this.width,
         y: Math.random() * this.height,
         r: Utils.lerp(0.7, 2.1, Math.random()),
-        vx: (Math.random() - 0.5) * 7,
-        vy: (Math.random() - 0.5) * 7 - 2.2, // gentle upward drift, like dust
+        vx: (Math.random() - 0.5) * 9.5,
+        vy: (Math.random() - 0.5) * 9.5 - 2.8, // gentle upward drift, like dust
         alpha: Utils.lerp(0.1, 0.32, Math.random()),
         accent: Math.random() < 0.3, // a minority tinted with the site's accent red
       });
@@ -998,9 +1118,13 @@ class PhysicsLayer {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
 
+    // Accent-tinted particles brighten as the cube explodes (same signal
+    // driving --explode-intensity in style.css), so the particle field and
+    // the studio backdrop warm up together rather than just the backdrop.
+    const accentBoost = 1 + this._lastExplode * 0.7;
     for (const p of this.particles) {
       ctx.beginPath();
-      ctx.fillStyle = Utils.hexToRgba(p.accent ? accentColor : neutralColor, p.alpha);
+      ctx.fillStyle = Utils.hexToRgba(p.accent ? accentColor : neutralColor, p.accent ? Math.min(1, p.alpha * accentBoost) : p.alpha);
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
     }
@@ -1023,7 +1147,7 @@ class PhysicsBackground {
     pageCanvas.id = 'physics-bg-canvas';
     document.body.prepend(pageCanvas);
     const pageWide = window.innerWidth >= 700;
-    this.pageLayer = new PhysicsLayer(pageCanvas, { particleCount: pageWide ? 130 : 65 });
+    this.pageLayer = new PhysicsLayer(pageCanvas, { particleCount: pageWide ? 195 : 98 });
     this.layers = [this.pageLayer];
 
     // The panel's own canvas (see .viewer-bg-canvas in style.css) — gives
@@ -1034,7 +1158,7 @@ class PhysicsBackground {
     if (panelCanvas && panelEl) {
       const panelWide = panelEl.getBoundingClientRect().width >= 700;
       this.panelLayer = new PhysicsLayer(panelCanvas, {
-        particleCount: panelWide ? 50 : 32,
+        particleCount: panelWide ? 75 : 48,
         boundsEl: panelEl,
         withRipple: true,
       });
@@ -1291,6 +1415,18 @@ class MasterExperience {
 
     this.interactionController = new InteractionController(this.canvas, this.cameraController);
 
+    this.pieceHoverLabel = new PieceHoverLabel(this.sceneManager, this.panelRoot, {
+      interactionController: this.interactionController,
+      // Ambiguous mid-fade during the transition (both models visible at
+      // once), so hover is simply off there rather than guessing which one
+      // the cursor is "over".
+      getActiveModel: () => {
+        if (this._phase === 'ghost') return this.ghostModel;
+        if (this._phase === 'rubik') return this.rubikModel;
+        return null;
+      },
+    });
+
     this.scrollController = new MasterScrollController(this.sectionEl, {
       ghostEnd: document.getElementById('marker-ghost-end'),
       transitionEnd: document.getElementById('marker-transition-end'),
@@ -1435,6 +1571,12 @@ class MasterExperience {
     // `t` in their own phases; Ghost is already fully exploded throughout
     // the transition.
     window.__rubricExplode = phase === 'transition' ? 1 : t;
+
+    // Same value, mirrored onto a CSS custom property so the studio
+    // backdrop's red glow (see --studio-glow-2 in style.css) can warm up
+    // as a cube comes apart, instead of sitting at one fixed intensity
+    // through the whole scroll journey.
+    document.documentElement.style.setProperty('--explode-intensity', String(window.__rubricExplode));
   }
 
   reset() {

@@ -39,7 +39,12 @@
      colored glows — like gelled studio spotlights against a black
      cyclorama — plus a vignette that gently darkens toward the page edges. */
   --studio-glow-1: rgba(168,85,247,.16); /* violet */
-  --studio-glow-2: rgba(255,45,59,.14);  /* red */
+  /* the red glow's own alpha rises with --explode-intensity (see
+     MasterExperience._tick in script.js, which writes it every frame as
+     window.__rubricExplode's 0..1 value) — the backdrop visibly warms as
+     a cube comes apart, tying the accent color to scroll progress rather
+     than sitting static throughout the whole journey */
+  --studio-glow-2: rgba(255,45,59, calc(.14 + var(--explode-intensity, 0) * .22));
   --studio-glow-3: rgba(56,130,255,.13); /* blue */
   --studio-vignette: rgba(0,0,0,.55);
   /* the actual layered gradient, shared verbatim by body AND .viewer-panel
@@ -82,7 +87,7 @@
   /* light theme keeps the studio backdrop white/red-toned rather than
      neon violet/blue, and a much softer vignette to suit a white page */
   --studio-glow-1: rgba(224,18,31,.07);
-  --studio-glow-2: rgba(224,18,31,.10);
+  --studio-glow-2: rgba(224,18,31, calc(.10 + var(--explode-intensity, 0) * .18));
   --studio-glow-3: rgba(224,18,31,.05);
   --studio-vignette: rgba(30,10,12,.08);
 
@@ -330,6 +335,30 @@ button{ font-family:inherit; cursor:pointer; }
   padding:calc(var(--header-h) + 18px) clamp(16px,2.4vw,32px) clamp(18px,2vw,28px);
 }
 .hud > *{ pointer-events:auto; }
+
+/* Follows the cursor while hovering an individual cube piece (see
+   PieceHoverLabel in script.js) — mouse/fine-pointer only, never shown on
+   touch. Reuses the same HUD pill tokens as .instructions so it reads as
+   part of the same chrome language. */
+.piece-hover-label{
+  position:absolute;
+  z-index:20;
+  pointer-events:none;
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.02em;
+  white-space:nowrap;
+  color:var(--hud-ink);
+  background:var(--hud-bg);
+  border:1px solid var(--hud-border);
+  backdrop-filter:blur(10px);
+  opacity:0;
+  transform:translateY(4px);
+  transition:opacity .15s var(--ease), transform .15s var(--ease);
+}
+.piece-hover-label.is-visible{ opacity:1; transform:translateY(0); }
 
 /* ==========================================================================
    Phase marker + the 3D-transition scroll runway — an invisible spacer the
