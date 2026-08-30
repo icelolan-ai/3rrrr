@@ -505,7 +505,17 @@ button{ font-family:inherit; cursor:pointer; }
   /* the 3D panel reads above the text on mobile — reorder visually rather
      than in the DOM, so the sticky panel still pins/releases correctly
      against its own section's scroll range */
-  .viewer-panel{ order:1; height:62svh; overflow:hidden; }
+  .viewer-panel{
+    order:1; height:62svh; overflow:hidden;
+    /* mobile-only: layer the same dot-grid texture (see body::before) on
+       top of the panel's own --studio-bg, so the cube's background carries
+       the dots too instead of reading as a separate plain patch. Desktop
+       keeps the plain --studio-bg (unchanged, no override needed there). */
+    background:
+      radial-gradient(var(--dot-color) 1px, transparent 1.4px) 0 0/20px 20px,
+      var(--studio-bg);
+    background-attachment:fixed;
+  }
   .content-col{ order:2; width:100%; padding-top:8px; }
   .showcase:first-of-type .content-col{ padding-top:8px; }
 
