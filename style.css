@@ -52,8 +52,8 @@
     radial-gradient(ellipse 120% 100% at 50% 50%, transparent 55%, var(--studio-vignette) 100%),
     var(--bg);
 
-  /* Halftone dot texture (see body::before, below) — faint in dark theme */
-  --halftone-color: rgba(255,255,255,.4);
+  /* Dot-grid texture (see body::before, below) — faint in dark theme */
+  --dot-color: rgba(255,255,255,.45);
 }
 
 /* ==========================================================================
@@ -83,8 +83,8 @@
   --studio-glow-3: rgba(224,18,31,.05);
   --studio-vignette: rgba(30,10,12,.08);
 
-  /* halftone texture reads dark-on-white here instead of light-on-black */
-  --halftone-color: rgba(224,18,31,.12);
+  /* dot-grid texture reads dark-on-white here instead of light-on-black */
+  --dot-color: rgba(20,10,12,.16);
 }
 
 *,*::before,*::after{ box-sizing:border-box; }
@@ -114,8 +114,8 @@ body{
   transition:background-color .4s var(--ease), color .4s var(--ease);
 }
 
-/* Halftone dot texture, layered over the studio backdrop above. Masked to
-   fade in only toward the page edges (and stay invisible over the readable
+/* Dot-grid texture, layered over the studio backdrop above. Masked to fade
+   in only toward the page edges (and stay invisible over the readable
    center), so it reads as edge decoration rather than noise behind the
    text. Fixed to the viewport like the rest of the backdrop, and sits
    behind every real element since it carries no z-index of its own. */
@@ -124,9 +124,8 @@ body::before{
   position:fixed;
   inset:0;
   pointer-events:none;
-  background-image:radial-gradient(var(--halftone-color) 2.5px, transparent 3.2px);
-  background-size:46px 46px;
-  background-position:10px 10px;
+  background-image:radial-gradient(var(--dot-color) 1px, transparent 1.4px);
+  background-size:20px 20px;
   -webkit-mask-image:radial-gradient(circle at 50% 50%, transparent 30vmin, black 58vmin);
   mask-image:radial-gradient(circle at 50% 50%, transparent 30vmin, black 58vmin);
 }
@@ -506,7 +505,17 @@ button{ font-family:inherit; cursor:pointer; }
   /* the 3D panel reads above the text on mobile — reorder visually rather
      than in the DOM, so the sticky panel still pins/releases correctly
      against its own section's scroll range */
-  .viewer-panel{ order:1; height:62svh; overflow:hidden; }
+  .viewer-panel{
+    order:1; height:62svh; overflow:hidden;
+    /* mobile-only: layer the same dot-grid texture (see body::before) on
+       top of the panel's own --studio-bg, so the cube's background carries
+       the dots too instead of reading as a separate plain patch. Desktop
+       keeps the plain --studio-bg (unchanged, no override needed there). */
+    background:
+      radial-gradient(var(--dot-color) 1px, transparent 1.4px) 0 0/20px 20px,
+      var(--studio-bg);
+    background-attachment:fixed;
+  }
   .content-col{ order:2; width:100%; padding-top:8px; }
   .showcase:first-of-type .content-col{ padding-top:8px; }
 
