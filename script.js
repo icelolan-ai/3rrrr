@@ -8,6 +8,7 @@
      ModelManager             loads GLB(s), matches nodes, records A/B transforms
      CameraController          spherical orbit camera, zoom, framing, reset
      AnimationManager           progress -> per-cubelet transform interpolation
+     CubeBurstParticles          3D THREE.Points burst tied to one model
      MasterScrollController      one continuous scroll -> phase + progress
      InteractionController        drag rotate / pinch zoom / gesture gating
      PieceHoverLabel                raycasts on hover, labels the piece type
@@ -643,6 +644,173 @@ class AnimationManager {
 
   resetAnimation() {
     this.setProgress(0);
+  }
+}
+
+/* ==========================================================================
+   CubeBurstParticles
+   A genuine 3D particle system (THREE.Points, additive-blended glowing
+   motes with a soft radial sprite) bound to one specific model's own
+   world-space geometry — kept entirely separate from PhysicsBackground's
+   page-wide 2D-canvas dust, which never touches the WebGL scene at all.
+   Watches that model's own explode progress and bursts a handful of
+   particles outward from a random piece's current world position
+   whenever progress is actively CHANGING (scrolling through the
+   explode), not merely non-zero — so it reads as dust the pieces
+   themselves are kicking up while separating, rather than a constant
+   ambient effect layered on top. Each burst particle radiates from the
+   model's own center through the spawning piece's current position, so
+   it visually originates from the cube and flies outward with it.
+   ========================================================================== */
+class CubeBurstParticles {
+  constructor(sceneManager, modelManager, { count = 260, accentColor = 0xff5a4a, baseColor = 0x9fd0ff } = {}) {
+    this.modelManager = modelManager;
+    this.count = count;
+    this.accentColor = new THREE.Color(accentColor);
+    this.baseColor = new THREE.Color(baseColor);
+    this._prevProgress = 0;
+    this._tmpVec = new THREE.Vector3();
+    this._tmpRootPos = new THREE.Vector3();
+
+    // Point size and velocity below were tuned against a ~10-world-unit
+    // exploded radius; scaled here so the effect stays proportionate on
+    // whatever model this is bound to, rather than being calibrated for
+    // one specific GLB's arbitrary export scale.
+    const explodedRadius = modelManager.explodedBoundingSphere?.radius || 10;
+    this._scale = explodedRadius / 10;
+
+    this.slots = Array.from({ length: count }, () => ({
+      active: false,
+      position: new THREE.Vector3(),
+      velocity: new THREE.Vector3(),
+      age: 0,
+      maxAge: 1,
+      accent: false,
+    }));
+
+    const geometry = new THREE.BufferGeometry();
+    this._positions = new Float32Array(count * 3);
+    this._colors = new Float32Array(count * 3);
+    geometry.setAttribute('position', new THREE.BufferAttribute(this._positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(this._colors, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 0.75 * this._scale,
+      map: this._makeSpriteTexture(),
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      sizeAttenuation: true,
+    });
+
+    this.points = new THREE.Points(geometry, material);
+    this.points.frustumCulled = false;
+    sceneManager.scene.add(this.points);
+
+    sceneManager.addRenderCallback((dt) => this._update(dt));
+  }
+
+  /** A soft radial-gradient dot (white center fading to transparent),
+   *  generated once on a small offscreen canvas — additive blending then
+   *  turns overlapping particles into a warm glow rather than flat
+   *  hard-edged circles. */
+  _makeSpriteTexture() {
+    const size = 64;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.35, 'rgba(255,255,255,.7)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  setVisible(visible) {
+    this.points.visible = visible;
+  }
+
+  /** Called every frame while this model's own explode phase is active —
+   *  bursts particles proportional to how fast progress is actually
+   *  changing right now (not its absolute value), so pieces read as
+   *  kicking up dust while separating rather than emitting at a constant
+   *  rate once exploded and scrolling has stopped. */
+  setProgress(t) {
+    const delta = Math.abs(t - this._prevProgress);
+    this._prevProgress = t;
+    if (delta < 0.0005) return;
+
+    const parts = Array.from(this.modelManager.getParts().values());
+    if (!parts.length) return;
+    this.modelManager.root.getWorldPosition(this._tmpRootPos);
+
+    const spawnCount = Math.min(10, Math.round(delta * 220));
+    for (let i = 0; i < spawnCount; i++) {
+      const slot = this.slots.find((s) => !s.active);
+      if (!slot) break;
+
+      const piece = parts[(Math.random() * parts.length) | 0];
+      piece.object3D.getWorldPosition(this._tmpVec);
+
+      const outward = this._tmpVec.clone().sub(this._tmpRootPos);
+      if (outward.lengthSq() < 1e-6) outward.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
+      outward.normalize();
+
+      slot.active = true;
+      // Start already a little clear of the spawning piece's own surface —
+      // otherwise, at typical frame rates, the particle is still touching
+      // (or behind) that piece's opaque geometry the moment it first gets
+      // drawn, and depth-testing hides it completely until it escapes.
+      slot.position.copy(this._tmpVec).addScaledVector(outward, 0.5 * this._scale);
+      slot.velocity
+        .copy(outward)
+        .multiplyScalar(Utils.lerp(2.5, 5, Math.random()) * this._scale)
+        .add(
+          new THREE.Vector3(
+            (Math.random() - 0.5) * 0.6 * this._scale,
+            (Math.random() - 0.5) * 0.6 * this._scale,
+            (Math.random() - 0.5) * 0.6 * this._scale
+          )
+        );
+      slot.age = 0;
+      slot.maxAge = Utils.lerp(0.5, 1.1, Math.random());
+      slot.accent = Math.random() < 0.3; // a minority tinted with the site's accent red
+    }
+  }
+
+  _update(dt) {
+    for (let i = 0; i < this.count; i++) {
+      const s = this.slots[i];
+      const idx3 = i * 3;
+      if (!s.active) {
+        this._colors[idx3] = this._colors[idx3 + 1] = this._colors[idx3 + 2] = 0;
+        continue;
+      }
+
+      s.age += dt;
+      if (s.age >= s.maxAge) {
+        s.active = false;
+        this._colors[idx3] = this._colors[idx3 + 1] = this._colors[idx3 + 2] = 0;
+        continue;
+      }
+
+      s.velocity.multiplyScalar(0.96); // gentle drag, settles rather than flying forever
+      s.position.addScaledVector(s.velocity, dt);
+
+      const lifeFrac = 1 - s.age / s.maxAge; // fades out via additive color intensity
+      const color = s.accent ? this.accentColor : this.baseColor;
+      this._positions[idx3] = s.position.x;
+      this._positions[idx3 + 1] = s.position.y;
+      this._positions[idx3 + 2] = s.position.z;
+      this._colors[idx3] = color.r * lifeFrac;
+      this._colors[idx3 + 1] = color.g * lifeFrac;
+      this._colors[idx3 + 2] = color.b * lifeFrac;
+    }
+    this.points.geometry.attributes.position.needsUpdate = true;
+    this.points.geometry.attributes.color.needsUpdate = true;
   }
 }
 
@@ -1393,6 +1561,15 @@ class MasterExperience {
     this.ghostAnim = new AnimationManager(this.ghostModel);
     this.rubikAnim = new AnimationManager(this.rubikModel);
 
+    // Bound only to the Ghost Cube (blue) — a dedicated 3D burst effect,
+    // kept fully separate from PhysicsBackground's page-wide 2D dust (see
+    // CubeBurstParticles above). Pieces kick up glowing motes as they
+    // separate, rather than the page's ambient background dust.
+    this.ghostBurst = new CubeBurstParticles(this.sceneManager, this.ghostModel, {
+      accentColor: 0xff5a4a,
+      baseColor: 0x9fd0ff,
+    });
+
     // Red Cube starts hidden/collapsed inside the Ghost Cube until the
     // transition phase grows it out.
     this.rubikModel.root.visible = false;
@@ -1477,6 +1654,8 @@ class MasterExperience {
       // Explode ties directly to scrolling through the Ghost Cube's own
       // hero+physics content — reading through it visibly breaks it apart.
       this.ghostAnim.setProgress(t);
+      this.ghostBurst.setProgress(t);
+      this.ghostBurst.setVisible(true);
       this.ghostModel.root.scale.setScalar(this._grabScale);
 
       this.interactionController.enabled = true;
@@ -1503,6 +1682,10 @@ class MasterExperience {
       // center, instead of snapping to hidden the instant Rubik's Cube phase
       // begins.
       this.ghostAnim.setProgress(1);
+      // No new bursts here (progress is pinned at 1, so setProgress would
+      // see zero delta anyway) — just let any still-fading particles from
+      // the ghost phase finish out naturally alongside the fade.
+      this.ghostBurst.setVisible(true);
       this.ghostModel.setOpacity(1 - eased);
       this.ghostModel.root.scale.setScalar(1);
       this.rubikModel.root.scale.setScalar(Utils.lerp(0.001, 1, eased));
@@ -1551,6 +1734,7 @@ class MasterExperience {
       }
 
       this.ghostModel.root.visible = false;
+      this.ghostBurst.setVisible(false);
       this.rubikModel.root.visible = true;
       this.rubikModel.root.scale.setScalar(this._grabScale);
 
