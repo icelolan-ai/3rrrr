@@ -663,11 +663,12 @@ class AnimationManager {
    it visually originates from the cube and flies outward with it.
    ========================================================================== */
 class CubeBurstParticles {
-  constructor(sceneManager, modelManager, { count = 260, accentColor = 0xff5a4a, baseColor = 0x9fd0ff } = {}) {
+  constructor(sceneManager, modelManager, { count = 260, accentColor = 0xff5a4a, baseColor = 0x9fd0ff, minEasedExplode = 0.06 } = {}) {
     this.modelManager = modelManager;
     this.count = count;
     this.accentColor = new THREE.Color(accentColor);
     this.baseColor = new THREE.Color(baseColor);
+    this._minEasedExplode = minEasedExplode;
     this._prevProgress = 0;
     this._tmpVec = new THREE.Vector3();
     this._tmpRootPos = new THREE.Vector3();
@@ -742,6 +743,13 @@ class CubeBurstParticles {
     const delta = Math.abs(t - this._prevProgress);
     this._prevProgress = t;
     if (delta < 0.0005) return;
+
+    // Pieces must have already visibly started separating (same
+    // easeInOutCubic curve AnimationManager itself moves them on) before
+    // any dust flies — otherwise a tiny scroll right at the very top,
+    // while the cube still reads as fully assembled, would already burst
+    // particles off of it.
+    if (Utils.easeInOutCubic(t) < this._minEasedExplode) return;
 
     const parts = Array.from(this.modelManager.getParts().values());
     if (!parts.length) return;
