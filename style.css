@@ -52,12 +52,11 @@
     radial-gradient(ellipse 120% 100% at 50% 50%, transparent 55%, var(--studio-vignette) 100%),
     var(--bg);
 
-  /* Very faint static dot-grid texture, layered on top of the studio
-     backdrop (see body::before / .viewer-panel::before, below) — a subtle
-     print-halftone touch underneath the physics particles, not a focal
-     pattern of its own. */
-  --dot-color: rgba(255,255,255,.4);
-  --dot-bg: radial-gradient(var(--dot-color) 1.1px, transparent 1.4px) 0 0/28px 28px;
+  /* Static dot-grid texture (see body::before / .viewer-panel::before,
+     below) — light theme only (see the override there): on dark theme the
+     physics particles alone carry the background, so this stays off here
+     rather than layering a second texture on top of them. */
+  --dot-bg: none;
 }
 
 /* ==========================================================================
@@ -87,8 +86,10 @@
   --studio-glow-3: rgba(224,18,31,.05);
   --studio-vignette: rgba(30,10,12,.08);
 
-  /* dot-grid reads dark-on-white here instead of light-on-black */
+  /* dot-grid is enabled for light theme only — dark theme leaves it off
+     (--dot-bg:none above) and relies on the physics particles alone */
   --dot-color: rgba(20,10,12,.22);
+  --dot-bg: radial-gradient(var(--dot-color) 1.1px, transparent 1.4px) 0 0/28px 28px;
 }
 
 *,*::before,*::after{ box-sizing:border-box; }
