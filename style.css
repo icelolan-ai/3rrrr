@@ -18,6 +18,11 @@
   --ease: cubic-bezier(.16,1,.3,1);
   --header-h: 76px;
 
+  /* driven by InteractiveBackground (script.js) — a small mouse/touch
+     parallax offset applied only to body::before's dot texture */
+  --dot-shift-x: 0px;
+  --dot-shift-y: 0px;
+
   /* the full-screen menu overlay always stays a fixed dark treatment,
      independent of the light/dark site theme, so these never change */
   --menu-ink: #f3f2ef;
@@ -129,6 +134,10 @@ body::before{
   position:fixed;
   inset:0;
   pointer-events:none;
+  /* subtle mouse/touch-follow parallax (see InteractiveBackground in
+     script.js) — only this texture layer moves, never the text or the
+     studio-glow backdrop underneath it */
+  transform:translate(var(--dot-shift-x), var(--dot-shift-y));
   background-image:radial-gradient(var(--dot-color) 0.6px, transparent 1px);
   background-size:32px 32px;
   -webkit-mask-image:
