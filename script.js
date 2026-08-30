@@ -1271,42 +1271,28 @@ class PanelUIManager {
    PhysicsBackground
    A cheap 2D-canvas background effect (kept separate from the Three.js
    scene so it never competes for the WebGL context): drifting dust/glitter
-   particles in the site's own accent-red and neutral-gray tones, plus a
-   brief shockwave ring whenever the active cube starts exploding (progress
-   rising from 0). Reads `window.__rubricExplode` — a plain 0..1 number
-   MasterExperience updates every tick — to both drive that trigger and
-   gently speed the particles up while a cube is mid-explosion, without any
-   tighter coupling to the 3D scene itself.
-
-   Runs across TWO canvases (see PhysicsLayer below), not one: .viewer-panel
-   is deliberately opaque so it can mask .content-col text scrolling
-   underneath it on mobile, which also means a single page-wide canvas
-   would be fully hidden anywhere the panel sits. So the panel gets its own
-   local canvas (.viewer-bg-canvas, inside .viewer-panel) drawing the same
-   kind of particles independently, keeping the two backgrounds visually
-   consistent instead of the panel reading as a flat, static patch. Skipped
+   particles in the site's own accent-red and neutral-gray tones, behind the
+   scrolling page text. Reads `window.__rubricExplode` — a plain 0..1 number
+   MasterExperience updates every tick — to gently speed the particles up
+   while a cube is mid-explosion, without any tighter coupling to the 3D
+   scene itself. Deliberately does NOT run inside the always-opaque
+   .viewer-panel (where the cube itself sits) — that panel used to host its
+   own local instance of this dust, but it read as particles drifting out of
+   the cube, so it was removed; the panel now stays a plain backdrop. Skipped
    entirely for prefers-reduced-motion.
    ========================================================================== */
-/** One independently-sized dust-particle field drawn into its own canvas.
- *  PhysicsBackground runs two of these — a page-wide one and a panel-local
- *  one — so the "same" background can render both behind the scrolling
- *  text (a fixed, viewport-sized canvas) and inside the always-opaque
- *  .viewer-panel (a small canvas scoped to the panel's own box), which
- *  .viewer-panel's opacity would otherwise fully hide (see .viewer-panel
- *  in style.css for why it has to stay opaque). */
+/** A dust-particle field drawn into its own canvas. */
 class PhysicsLayer {
-  constructor(canvas, { particleCount, boundsEl = null, withRipple = false, dimFactor = 1 }) {
+  constructor(canvas, { particleCount, boundsEl = null, dimFactor = 1 }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.boundsEl = boundsEl; // null = size to the viewport; else size to this element's own box
     this.particleCount = particleCount;
-    this.withRipple = withRipple;
     // Overall opacity multiplier for the ambient dust, kept separate from
     // each particle's own randomized alpha so it can be tuned per-layer
     // without touching the spawn/draw logic itself.
     this.dimFactor = dimFactor;
     this.particles = [];
-    this.ripples = [];
     this._lastExplode = 0;
 
     this.resize();
@@ -1338,19 +1324,8 @@ class PhysicsLayer {
     }
   }
 
-  /** Fires once at the exact moment a cube starts coming apart (explode
-   *  progress rising off zero), centered on this layer's own box — for the
-   *  panel layer that's simply its own center, since it's already scoped
-   *  to the 3D viewer panel's box (no viewport rect math needed). */
-  _maybeTriggerShockwave(explode) {
-    if (this.withRipple && this._lastExplode <= 0.001 && explode > 0.001) {
-      this.ripples.push({ x: this.width / 2, y: this.height / 2, radius: 0, alpha: 0.45 });
-    }
-    this._lastExplode = explode;
-  }
-
   update(dt, explode) {
-    this._maybeTriggerShockwave(explode);
+    this._lastExplode = explode;
 
     const energy = 1 + explode * 1.6; // particles drift a bit faster as pieces separate
     for (const p of this.particles) {
@@ -1361,12 +1336,6 @@ class PhysicsLayer {
       if (p.y < -10) p.y = this.height + 10;
       if (p.y > this.height + 10) p.y = -10;
     }
-
-    for (const r of this.ripples) {
-      r.radius += 260 * dt;
-      r.alpha -= dt * 0.6;
-    }
-    this.ripples = this.ripples.filter((r) => r.alpha > 0);
   }
 
   draw(accentColor, neutralColor) {
@@ -1386,14 +1355,6 @@ class PhysicsLayer {
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
     }
-
-    for (const r of this.ripples) {
-      ctx.beginPath();
-      ctx.strokeStyle = Utils.hexToRgba(accentColor, Math.max(r.alpha, 0));
-      ctx.lineWidth = 1.5;
-      ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
-      ctx.stroke();
-    }
   }
 }
 
@@ -1407,27 +1368,6 @@ class PhysicsBackground {
     const pageWide = window.innerWidth >= 700;
     this.pageLayer = new PhysicsLayer(pageCanvas, { particleCount: pageWide ? 195 : 98, dimFactor: 0.35 });
     this.layers = [this.pageLayer];
-
-    // The panel's own canvas (see .viewer-bg-canvas in style.css) — gives
-    // the always-opaque .viewer-panel the same drifting-dust look, and
-    // hosts the shockwave ripple where it's actually visible.
-    const panelCanvas = document.querySelector('.viewer-bg-canvas');
-    const panelEl = document.querySelector('.viewer-panel');
-    if (panelCanvas && panelEl) {
-      const panelWide = panelEl.getBoundingClientRect().width >= 700;
-      this.panelLayer = new PhysicsLayer(panelCanvas, {
-        particleCount: panelWide ? 75 : 48,
-        boundsEl: panelEl,
-        withRipple: true,
-        dimFactor: 0.35,
-      });
-      this.layers.push(this.panelLayer);
-
-      if (window.ResizeObserver) {
-        this._panelObserver = new ResizeObserver(() => this.panelLayer.resize());
-        this._panelObserver.observe(panelEl);
-      }
-    }
 
     window.addEventListener('resize', () => this.pageLayer.resize());
 
