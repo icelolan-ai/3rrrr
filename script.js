@@ -679,6 +679,15 @@ class CubeBurstParticles {
     // one specific GLB's arbitrary export scale.
     const explodedRadius = modelManager.explodedBoundingSphere?.radius || 10;
     this._scale = explodedRadius / 10;
+    // A recalled particle counts as "home" once it's back inside the
+    // cube's own assembled footprint — not some arbitrary small distance
+    // from the exact center point. Using the real assembled radius here
+    // (rather than a small multiple of _scale) also makes the arrival
+    // check robust against a fast-moving particle's single-frame travel
+    // distance overshooting a too-small target radius entirely, which is
+    // exactly what a tighter radius did: it could cross clean through it
+    // between one frame and the next without ever landing inside it.
+    this._arrivalRadius = (modelManager.boundingSphere?.radius || explodedRadius / 2) * 1.1;
 
     this.slots = Array.from({ length: count }, () => ({
       active: false,
@@ -815,6 +824,17 @@ class CubeBurstParticles {
       toCenter.normalize();
       s.velocity.copy(toCenter).multiplyScalar(Utils.lerp(3, 6, Math.random()) * this._scale);
       s.recalled = true;
+      // The original maxAge (0.5-1.1s) was budgeted for the short
+      // outward burst only. A particle that had already been flying
+      // outward for a while before the scroll reversed doesn't
+      // necessarily have enough of that lifespan left to travel all the
+      // way back before it expires — it would then fade out mid-flight
+      // via the normal age check below, still outside the cube, which is
+      // exactly the "doesn't go back in" bug. Reset its clock so aging
+      // out can never cut the return trip short; only actually arriving
+      // (see the distance check below) ends a recalled particle's life.
+      s.age = 0;
+      s.maxAge = 6; // generous safety cap — arrival (below) despawns it well before this in the normal case
     }
   }
 
@@ -835,14 +855,20 @@ class CubeBurstParticles {
         continue;
       }
 
-      s.velocity.multiplyScalar(0.96); // gentle drag, settles rather than flying forever
+      // Drag only applies to the outward burst (a short, energetic flight
+      // that's meant to settle quickly) — a recalled particle has to
+      // cover that same distance again in reverse, and the same drag
+      // bleeds off its speed long before it can get there, leaving it
+      // stalled in open space until age finally cuts it off. Recalled
+      // particles keep their full homing speed the whole way home.
+      if (!s.recalled) s.velocity.multiplyScalar(0.96);
       s.position.addScaledVector(s.velocity, dt);
 
       // A recalled particle that's actually made it back to the cube is
       // done — despawn it here rather than waiting out its normal
       // age/maxAge fade, so it reads as absorbed into the cube instead
       // of quietly fading away next to it.
-      if (s.recalled && s.position.distanceToSquared(this._tmpRootPos) < (0.4 * this._scale) ** 2) {
+      if (s.recalled && s.position.distanceToSquared(this._tmpRootPos) < this._arrivalRadius ** 2) {
         s.active = false;
         this._colors[idx3] = this._colors[idx3 + 1] = this._colors[idx3 + 2] = 0;
         continue;
