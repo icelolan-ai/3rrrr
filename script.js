@@ -1295,12 +1295,16 @@ class PanelUIManager {
  *  .viewer-panel's opacity would otherwise fully hide (see .viewer-panel
  *  in style.css for why it has to stay opaque). */
 class PhysicsLayer {
-  constructor(canvas, { particleCount, boundsEl = null, withRipple = false }) {
+  constructor(canvas, { particleCount, boundsEl = null, withRipple = false, dimFactor = 1 }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.boundsEl = boundsEl; // null = size to the viewport; else size to this element's own box
     this.particleCount = particleCount;
     this.withRipple = withRipple;
+    // Overall opacity multiplier for the ambient dust, kept separate from
+    // each particle's own randomized alpha so it can be tuned per-layer
+    // without touching the spawn/draw logic itself.
+    this.dimFactor = dimFactor;
     this.particles = [];
     this.ripples = [];
     this._lastExplode = 0;
@@ -1375,7 +1379,10 @@ class PhysicsLayer {
     const accentBoost = 1 + this._lastExplode * 0.7;
     for (const p of this.particles) {
       ctx.beginPath();
-      ctx.fillStyle = Utils.hexToRgba(p.accent ? accentColor : neutralColor, p.accent ? Math.min(1, p.alpha * accentBoost) : p.alpha);
+      ctx.fillStyle = Utils.hexToRgba(
+        p.accent ? accentColor : neutralColor,
+        (p.accent ? Math.min(1, p.alpha * accentBoost) : p.alpha) * this.dimFactor
+      );
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
     }
@@ -1398,7 +1405,7 @@ class PhysicsBackground {
     pageCanvas.id = 'physics-bg-canvas';
     document.body.prepend(pageCanvas);
     const pageWide = window.innerWidth >= 700;
-    this.pageLayer = new PhysicsLayer(pageCanvas, { particleCount: pageWide ? 195 : 98 });
+    this.pageLayer = new PhysicsLayer(pageCanvas, { particleCount: pageWide ? 195 : 98, dimFactor: 0.35 });
     this.layers = [this.pageLayer];
 
     // The panel's own canvas (see .viewer-bg-canvas in style.css) — gives
@@ -1412,6 +1419,7 @@ class PhysicsBackground {
         particleCount: panelWide ? 75 : 48,
         boundsEl: panelEl,
         withRipple: true,
+        dimFactor: 0.35,
       });
       this.layers.push(this.panelLayer);
 
