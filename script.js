@@ -663,12 +663,21 @@ class AnimationManager {
    it visually originates from the cube and flies outward with it.
    ========================================================================== */
 class CubeBurstParticles {
-  constructor(sceneManager, modelManager, { count = 260, accentColor = 0xff5a4a, baseColor = 0x9fd0ff, minEasedExplode = 0.06 } = {}) {
+  constructor(
+    sceneManager,
+    modelManager,
+    { count = 260, accentColor = 0xff5a4a, baseColor = 0x9fd0ff, minEasedExplode = 0.06, brightness = 0.35 } = {}
+  ) {
     this.modelManager = modelManager;
     this.count = count;
     this.accentColor = new THREE.Color(accentColor);
     this.baseColor = new THREE.Color(baseColor);
     this._minEasedExplode = minEasedExplode;
+    // Peak color intensity multiplier (at spawn, before age fades it
+    // further) — additive blending at full 0..1 RGB reads as a fairly
+    // bold, saturated flash; this keeps the burst as a quiet accent
+    // rather than something that competes with the cube itself.
+    this._brightness = brightness;
     this._prevProgress = 0;
     this._tmpVec = new THREE.Vector3();
     this._tmpRootPos = new THREE.Vector3();
@@ -874,7 +883,7 @@ class CubeBurstParticles {
         continue;
       }
 
-      const lifeFrac = 1 - s.age / s.maxAge; // fades out via additive color intensity
+      const lifeFrac = (1 - s.age / s.maxAge) * this._brightness; // fades out via additive color intensity
       const color = s.accent ? this.accentColor : this.baseColor;
       this._positions[idx3] = s.position.x;
       this._positions[idx3 + 1] = s.position.y;
