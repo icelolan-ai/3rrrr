@@ -687,6 +687,7 @@ class CubeBurstParticles {
       age: 0,
       maxAge: 1,
       accent: false,
+      recalled: false,
     }));
 
     const geometry = new THREE.BufferGeometry();
@@ -736,13 +737,20 @@ class CubeBurstParticles {
 
   /** Called every frame while this model's own explode phase is active —
    *  bursts particles proportional to how fast progress is actually
-   *  changing right now (not its absolute value), so pieces read as
+   *  INCREASING right now (not its absolute value), so pieces read as
    *  kicking up dust while separating rather than emitting at a constant
-   *  rate once exploded and scrolling has stopped. */
+   *  rate once exploded and scrolling has stopped. Scrolling back the
+   *  other way (reassembling) recalls whatever's still flying instead of
+   *  bursting more of it — see _recallActiveParticles(). */
   setProgress(t) {
-    const delta = Math.abs(t - this._prevProgress);
+    const signedDelta = t - this._prevProgress;
     this._prevProgress = t;
-    if (delta < 0.0005) return;
+    if (Math.abs(signedDelta) < 0.0005) return;
+
+    if (signedDelta < 0) {
+      this._recallActiveParticles();
+      return;
+    }
 
     // Pieces must have already visibly started separating (same
     // easeInOutCubic curve AnimationManager itself moves them on) before
@@ -751,6 +759,7 @@ class CubeBurstParticles {
     // particles off of it.
     if (Utils.easeInOutCubic(t) < this._minEasedExplode) return;
 
+    const delta = signedDelta;
     const parts = Array.from(this.modelManager.getParts().values());
     if (!parts.length) return;
     this.modelManager.root.getWorldPosition(this._tmpRootPos);
@@ -768,6 +777,7 @@ class CubeBurstParticles {
       outward.normalize();
 
       slot.active = true;
+      slot.recalled = false;
       // Start already a little clear of the spawning piece's own surface —
       // otherwise, at typical frame rates, the particle is still touching
       // (or behind) that piece's opaque geometry the moment it first gets
@@ -789,7 +799,27 @@ class CubeBurstParticles {
     }
   }
 
+  /** Scrolling back the other way (reassembling) — instead of leaving
+   *  already-flying dust drifting outward forever (or just fading in
+   *  place, off to the side of the now-closed cube), re-aim every active
+   *  particle's velocity toward the model's current center every frame
+   *  this keeps firing, so they home in and visually get pulled back
+   *  into the cube as it closes up. _update() despawns them once they
+   *  actually arrive. */
+  _recallActiveParticles() {
+    this.modelManager.root.getWorldPosition(this._tmpRootPos);
+    for (const s of this.slots) {
+      if (!s.active) continue;
+      const toCenter = this._tmpRootPos.clone().sub(s.position);
+      if (toCenter.lengthSq() < 1e-6) continue;
+      toCenter.normalize();
+      s.velocity.copy(toCenter).multiplyScalar(Utils.lerp(3, 6, Math.random()) * this._scale);
+      s.recalled = true;
+    }
+  }
+
   _update(dt) {
+    this.modelManager.root.getWorldPosition(this._tmpRootPos);
     for (let i = 0; i < this.count; i++) {
       const s = this.slots[i];
       const idx3 = i * 3;
@@ -807,6 +837,16 @@ class CubeBurstParticles {
 
       s.velocity.multiplyScalar(0.96); // gentle drag, settles rather than flying forever
       s.position.addScaledVector(s.velocity, dt);
+
+      // A recalled particle that's actually made it back to the cube is
+      // done — despawn it here rather than waiting out its normal
+      // age/maxAge fade, so it reads as absorbed into the cube instead
+      // of quietly fading away next to it.
+      if (s.recalled && s.position.distanceToSquared(this._tmpRootPos) < (0.4 * this._scale) ** 2) {
+        s.active = false;
+        this._colors[idx3] = this._colors[idx3 + 1] = this._colors[idx3 + 2] = 0;
+        continue;
+      }
 
       const lifeFrac = 1 - s.age / s.maxAge; // fades out via additive color intensity
       const color = s.accent ? this.accentColor : this.baseColor;
