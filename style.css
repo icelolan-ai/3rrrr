@@ -244,10 +244,10 @@ button{ font-family:inherit; cursor:pointer; }
   height:100svh;
   overflow:visible;
   flex-shrink:0;
-  /* plain --bg (matching <body>'s own background) rather than a distinct
-     panel tint, so the canvas bleeding past the panel's left edge blends
-     into one continuous background instead of a visible seam */
-  background:var(--bg);
+  /* transparent rather than a solid fill, so body's own fixed studio-light
+     backdrop (see body, above) shows through continuously behind the cube
+     too instead of the panel sitting on top of it as a separate flat patch */
+  background:transparent;
   z-index:10;
 }
 .viewer-canvas{
