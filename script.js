@@ -13,7 +13,7 @@
      PanelUIManager                per-panel HUD, reset button, progress bar
      ResponsiveManager             resize / orientation / DPR handling
      ThemeManager                  shared dark/light site theme toggle
-     InteractiveBackground        mouse/touch parallax on the dot texture
+     PhysicsBackground             2D-canvas particles + explosion shockwave
      GlobalChrome                  shared menu, reveals, error overlay
      MasterExperience               the whole journey: Ghost -> 3D transition
                                      -> Rubik's Cube -> explode, one scene
@@ -44,6 +44,19 @@ const Utils = {
     if (diff > Math.PI) diff -= twoPi;
     if (diff < -Math.PI) diff += twoPi;
     return ref + diff;
+  },
+  // #rrggbb (as read from a CSS custom property) -> "rgba(r,g,b,a)". Falls
+  // back to a neutral gray if the value isn't a hex color for any reason,
+  // so a missing/misnamed custom property degrades quietly rather than
+  // breaking canvas drawing.
+  hexToRgba: (hex, alpha) => {
+    const match = /^#([0-9a-f]{6})$/i.exec(hex || '');
+    if (!match) return `rgba(128,128,128,${alpha})`;
+    const int = parseInt(match[1], 16);
+    const r = (int >> 16) & 255;
+    const g = (int >> 8) & 255;
+    const b = int & 255;
+    return `rgba(${r},${g},${b},${alpha})`;
   },
 };
 
@@ -884,50 +897,128 @@ class PanelUIManager {
 }
 
 /* ==========================================================================
-   InteractiveBackground
-   A small mouse/touch-follow parallax on the dot-grid texture (see
-   body::before in style.css) — moving the cursor or dragging a finger
-   nudges the dots a few pixels toward it, purely as a decorative touch.
-   Writes only two CSS custom properties consumed by body::before's own
-   transform, so nothing else on the page (least of all the text) is ever
-   affected. Damped toward the live pointer position every frame rather
-   than snapping, and skipped entirely for prefers-reduced-motion.
+   PhysicsBackground
+   A cheap 2D-canvas background layer (kept separate from the Three.js scene
+   so it never competes for the WebGL context): a handful of drifting
+   dust/glitter particles in the site's own accent-red and neutral-gray
+   tones, plus a brief shockwave ring drawn from the 3D viewer panel's own
+   center whenever the active cube starts exploding (progress rising from
+   0). Reads `window.__rubricExplode` — a plain 0..1 number MasterExperience
+   updates every tick — to both drive that trigger and gently speed the
+   particles up while a cube is mid-explosion, without any tighter coupling
+   to the 3D scene itself. Skipped entirely for prefers-reduced-motion.
    ========================================================================== */
-class InteractiveBackground {
+class PhysicsBackground {
   constructor() {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-    this.maxShift = 14; // px — subtle, not meant to be attention-grabbing
-    this.targetX = 0;
-    this.targetY = 0;
-    this.currentX = 0;
-    this.currentY = 0;
+    this.canvas = document.createElement('canvas');
+    this.canvas.id = 'physics-bg-canvas';
+    document.body.prepend(this.canvas);
+    this.ctx = this.canvas.getContext('2d');
 
-    const setTarget = (clientX, clientY) => {
-      this.targetX = (clientX / window.innerWidth - 0.5) * 2 * this.maxShift;
-      this.targetY = (clientY / window.innerHeight - 0.5) * 2 * this.maxShift;
-    };
-    window.addEventListener('pointermove', (e) => setTarget(e.clientX, e.clientY), { passive: true });
-    window.addEventListener(
-      'touchmove',
-      (e) => {
-        const touch = e.touches[0];
-        if (touch) setTarget(touch.clientX, touch.clientY);
-      },
-      { passive: true }
-    );
+    this.particles = [];
+    this.ripples = [];
+    this._lastExplode = 0;
+
+    this._resize = this._resize.bind(this);
+    window.addEventListener('resize', this._resize);
+    this._resize();
+    this._spawnParticles();
 
     let lastTime = performance.now();
     const tick = (now) => {
       const dt = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
-      this.currentX = Utils.damp(this.currentX, this.targetX, 5, dt);
-      this.currentY = Utils.damp(this.currentY, this.targetY, 5, dt);
-      document.documentElement.style.setProperty('--dot-shift-x', `${this.currentX.toFixed(2)}px`);
-      document.documentElement.style.setProperty('--dot-shift-y', `${this.currentY.toFixed(2)}px`);
+      this._update(dt);
+      this._draw();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
+  }
+
+  _resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.width = window.innerWidth;
+    this.height = window.innerHeight;
+    this.canvas.width = this.width * dpr;
+    this.canvas.height = this.height * dpr;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  _spawnParticles() {
+    const count = this.width < 700 ? 24 : 46;
+    for (let i = 0; i < count; i++) {
+      this.particles.push({
+        x: Math.random() * this.width,
+        y: Math.random() * this.height,
+        r: Utils.lerp(0.7, 2.1, Math.random()),
+        vx: (Math.random() - 0.5) * 5,
+        vy: (Math.random() - 0.5) * 5 - 1.5, // gentle upward drift, like dust
+        alpha: Utils.lerp(0.1, 0.32, Math.random()),
+        accent: Math.random() < 0.3, // a minority tinted with the site's accent red
+      });
+    }
+  }
+
+  /** Fires once at the exact moment a cube starts coming apart (explode
+   *  progress rising off zero), centered on the 3D viewer panel currently
+   *  on screen — an approximation of the cube's screen position that
+   *  avoids needing a full 3D-to-2D projection for a purely decorative
+   *  flourish. */
+  _maybeTriggerShockwave(explode) {
+    if (this._lastExplode <= 0.001 && explode > 0.001) {
+      const panel = document.querySelector('.viewer-panel');
+      if (panel) {
+        const rect = panel.getBoundingClientRect();
+        this.ripples.push({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, radius: 0, alpha: 0.45 });
+      }
+    }
+    this._lastExplode = explode;
+  }
+
+  _update(dt) {
+    const explode = window.__rubricExplode || 0;
+    this._maybeTriggerShockwave(explode);
+
+    const energy = 1 + explode * 1.6; // particles drift a bit faster as pieces separate
+    for (const p of this.particles) {
+      p.x += p.vx * energy * dt;
+      p.y += p.vy * energy * dt;
+      if (p.x < -10) p.x = this.width + 10;
+      if (p.x > this.width + 10) p.x = -10;
+      if (p.y < -10) p.y = this.height + 10;
+      if (p.y > this.height + 10) p.y = -10;
+    }
+
+    for (const r of this.ripples) {
+      r.radius += 260 * dt;
+      r.alpha -= dt * 0.6;
+    }
+    this.ripples = this.ripples.filter((r) => r.alpha > 0);
+  }
+
+  _draw() {
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, this.width, this.height);
+
+    const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-glow').trim();
+    const neutralColor = getComputedStyle(document.documentElement).getPropertyValue('--ink-faint').trim();
+
+    for (const p of this.particles) {
+      ctx.beginPath();
+      ctx.fillStyle = Utils.hexToRgba(p.accent ? accentColor : neutralColor, p.alpha);
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (const r of this.ripples) {
+      ctx.beginPath();
+      ctx.strokeStyle = Utils.hexToRgba(accentColor, Math.max(r.alpha, 0));
+      ctx.lineWidth = 1.5;
+      ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 }
 
@@ -935,14 +1026,14 @@ class InteractiveBackground {
    GlobalChrome
    Page-wide UI that exists exactly once regardless of how many Experiences
    are on the page: the full-screen menu, scroll-reveal animations, the
-   interactive dot-background parallax, and the shared error overlay.
+   physics-effect background, and the shared error overlay.
    ========================================================================== */
 class GlobalChrome {
   constructor() {
     this._renderMath();
     this._bindMenu();
     this._bindReveals();
-    this.interactiveBackground = new InteractiveBackground();
+    this.physicsBackground = new PhysicsBackground();
     document.getElementById('error-retry-btn').addEventListener('click', () => window.location.reload());
   }
 
@@ -1293,6 +1384,14 @@ class MasterExperience {
 
     if (phase !== 'transition') this._transitionBase = null;
     this._phase = phase;
+
+    // A plain global rather than a tighter coupling: PhysicsBackground (a
+    // page-wide 2D-canvas decoration, deliberately kept independent of the
+    // Three.js scene) reads this each frame to time its shockwave trigger
+    // and scale particle drift speed. Ghost/Rubik explode tie directly to
+    // `t` in their own phases; Ghost is already fully exploded throughout
+    // the transition.
+    window.__rubricExplode = phase === 'transition' ? 1 : t;
   }
 
   reset() {
