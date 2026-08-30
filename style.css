@@ -481,11 +481,20 @@ button{ font-family:inherit; cursor:pointer; }
    Outro (shared, after every showcase)
    ========================================================================== */
 .outro-col{
-  /* at least one full viewport tall, so the last showcase's sticky panel
-     always has enough trailing scroll room to fully release before the
-     page ends, instead of lingering alongside this shorter content */
+  /* at least one full viewport tall — not just spacing, this is the exact
+     minimum scroll math requires: the sticky panel's release completes
+     right at this section's own top edge, and any point on a page needs
+     one full viewport of trailing content after it before it can reach
+     the very top of the viewport (max-scroll = documentHeight -
+     viewportHeight). Shrinking this strands the panel pinned in place
+     with nowhere left to scroll it away.
+     The footer sits at the BOTTOM of that reserved space rather than
+     centered within it, so the blank stretch is scrolled *through* —
+     cube slides away, then the footer settles at the very bottom right
+     as the page ends — instead of the whole viewport showing empty space
+     above and below a footer floating in the middle. */
   min-height:100vh;
-  display:flex; flex-direction:column; justify-content:center;
+  display:flex; flex-direction:column; justify-content:flex-end;
 }
 
 .site-footer{
