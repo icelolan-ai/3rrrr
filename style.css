@@ -268,9 +268,12 @@ button{ font-family:inherit; cursor:pointer; }
 .hero-title-accent{ color:var(--ink-dim); font-weight:300; }
 .hero-sub{ color:var(--ink-dim); max-width:52ch; font-size:clamp(15px,1.3vw,17px); margin:0; }
 
-/* scroll-reveal (JS toggles .in-view) */
-.reveal{ opacity:0; transform:translateY(26px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
-.reveal.in-view{ opacity:1; transform:translateY(0); }
+/* scroll-reveal — JS sets opacity/transform directly as a continuous
+   function of each element's own scroll position (see GlobalChrome
+   _bindReveals), so stacked blocks fade in and out one at a time in step
+   with scrolling rather than several snapping to visible together. The
+   short transition just bridges the gap between scroll-event ticks. */
+.reveal{ opacity:0; transform:translateY(26px); transition:opacity .12s linear, transform .12s linear; }
 
 .hud-top{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .instructions{

@@ -935,19 +935,30 @@ class GlobalChrome {
     });
   }
 
-  /** Two-way reveal: text fades IN as it scrolls into view and fades back
-   *  OUT once scrolled past, rather than staying visible forever. */
+  /** Continuous scroll-linked reveal: each element's own opacity/offset is a
+   *  pure function of its own position in the viewport (not a threshold
+   *  snap), so stacked physics blocks fade in and back out one at a time in
+   *  step with scrolling — never several popping to visible together —
+   *  fully reversible on scroll-up, and applies uniformly to every `.reveal`
+   *  element on the page (both the Ghost and the Rubik's Cube content). */
   _bindReveals() {
-    const items = document.querySelectorAll('.reveal');
-    const io = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          entry.target.classList.toggle('in-view', entry.isIntersecting);
-        });
-      },
-      { threshold: 0.2 }
-    );
-    items.forEach((el) => io.observe(el));
+    const items = Array.from(document.querySelectorAll('.reveal'));
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return; // CSS keeps them fully visible
+
+    const update = () => {
+      const vh = window.innerHeight;
+      const zoneStart = vh * 0.92; // element's top crossing here begins its fade-in
+      const zoneEnd = vh * 0.55; // and it's fully revealed by the time it reaches here
+      for (const el of items) {
+        const top = el.getBoundingClientRect().top;
+        const progress = Utils.clamp((zoneStart - top) / (zoneStart - zoneEnd), 0, 1);
+        el.style.opacity = progress;
+        el.style.transform = `translateY(${(1 - progress) * 26}px)`;
+      }
+    };
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    update();
   }
 
   showError(message) {
