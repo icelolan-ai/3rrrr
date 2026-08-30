@@ -8,7 +8,6 @@
      ModelManager             loads GLB(s), matches nodes, records A/B transforms
      CameraController          spherical orbit camera, zoom, framing, reset
      AnimationManager           progress -> per-cubelet transform interpolation
-     CubeBurstParticles          3D THREE.Points burst tied to one model
      MasterScrollController      one continuous scroll -> phase + progress
      InteractionController        drag rotate / pinch zoom / gesture gating
      PieceHoverLabel                raycasts on hover, labels the piece type
@@ -648,256 +647,6 @@ class AnimationManager {
 }
 
 /* ==========================================================================
-   CubeBurstParticles
-   A genuine 3D particle system (THREE.Points, additive-blended glowing
-   motes with a soft radial sprite) bound to one specific model's own
-   world-space geometry — kept entirely separate from PhysicsBackground's
-   page-wide 2D-canvas dust, which never touches the WebGL scene at all.
-   Watches that model's own explode progress and bursts a handful of
-   particles outward from a random piece's current world position
-   whenever progress is actively CHANGING (scrolling through the
-   explode), not merely non-zero — so it reads as dust the pieces
-   themselves are kicking up while separating, rather than a constant
-   ambient effect layered on top. Each burst particle radiates from the
-   model's own center through the spawning piece's current position, so
-   it visually originates from the cube and flies outward with it.
-   ========================================================================== */
-class CubeBurstParticles {
-  constructor(
-    sceneManager,
-    modelManager,
-    { count = 260, accentColor = 0xff5a4a, baseColor = 0x9fd0ff, minEasedExplode = 0.06, brightness = 0.35 } = {}
-  ) {
-    this.modelManager = modelManager;
-    this.count = count;
-    this.accentColor = new THREE.Color(accentColor);
-    this.baseColor = new THREE.Color(baseColor);
-    this._minEasedExplode = minEasedExplode;
-    // Peak color intensity multiplier (at spawn, before age fades it
-    // further) — additive blending at full 0..1 RGB reads as a fairly
-    // bold, saturated flash; this keeps the burst as a quiet accent
-    // rather than something that competes with the cube itself.
-    this._brightness = brightness;
-    this._prevProgress = 0;
-    this._tmpVec = new THREE.Vector3();
-    this._tmpRootPos = new THREE.Vector3();
-
-    // Point size and velocity below were tuned against a ~10-world-unit
-    // exploded radius; scaled here so the effect stays proportionate on
-    // whatever model this is bound to, rather than being calibrated for
-    // one specific GLB's arbitrary export scale.
-    const explodedRadius = modelManager.explodedBoundingSphere?.radius || 10;
-    this._scale = explodedRadius / 10;
-    // A recalled particle counts as "home" once it's back inside the
-    // cube's own assembled footprint — not some arbitrary small distance
-    // from the exact center point. Using the real assembled radius here
-    // (rather than a small multiple of _scale) also makes the arrival
-    // check robust against a fast-moving particle's single-frame travel
-    // distance overshooting a too-small target radius entirely, which is
-    // exactly what a tighter radius did: it could cross clean through it
-    // between one frame and the next without ever landing inside it.
-    this._arrivalRadius = (modelManager.boundingSphere?.radius || explodedRadius / 2) * 1.1;
-
-    this.slots = Array.from({ length: count }, () => ({
-      active: false,
-      position: new THREE.Vector3(),
-      velocity: new THREE.Vector3(),
-      age: 0,
-      maxAge: 1,
-      accent: false,
-      recalled: false,
-    }));
-
-    const geometry = new THREE.BufferGeometry();
-    this._positions = new Float32Array(count * 3);
-    this._colors = new Float32Array(count * 3);
-    geometry.setAttribute('position', new THREE.BufferAttribute(this._positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(this._colors, 3));
-
-    const material = new THREE.PointsMaterial({
-      size: 0.75 * this._scale,
-      map: this._makeSpriteTexture(),
-      vertexColors: true,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      sizeAttenuation: true,
-    });
-
-    this.points = new THREE.Points(geometry, material);
-    this.points.frustumCulled = false;
-    sceneManager.scene.add(this.points);
-
-    sceneManager.addRenderCallback((dt) => this._update(dt));
-  }
-
-  /** A soft radial-gradient dot (white center fading to transparent),
-   *  generated once on a small offscreen canvas — additive blending then
-   *  turns overlapping particles into a warm glow rather than flat
-   *  hard-edged circles. */
-  _makeSpriteTexture() {
-    const size = 64;
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    gradient.addColorStop(0, 'rgba(255,255,255,1)');
-    gradient.addColorStop(0.35, 'rgba(255,255,255,.7)');
-    gradient.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, size, size);
-    return new THREE.CanvasTexture(canvas);
-  }
-
-  setVisible(visible) {
-    this.points.visible = visible;
-  }
-
-  /** Called every frame while this model's own explode phase is active —
-   *  bursts particles proportional to how fast progress is actually
-   *  INCREASING right now (not its absolute value), so pieces read as
-   *  kicking up dust while separating rather than emitting at a constant
-   *  rate once exploded and scrolling has stopped. Scrolling back the
-   *  other way (reassembling) recalls whatever's still flying instead of
-   *  bursting more of it — see _recallActiveParticles(). */
-  setProgress(t) {
-    const signedDelta = t - this._prevProgress;
-    this._prevProgress = t;
-    if (Math.abs(signedDelta) < 0.0005) return;
-
-    if (signedDelta < 0) {
-      this._recallActiveParticles();
-      return;
-    }
-
-    // Pieces must have already visibly started separating (same
-    // easeInOutCubic curve AnimationManager itself moves them on) before
-    // any dust flies — otherwise a tiny scroll right at the very top,
-    // while the cube still reads as fully assembled, would already burst
-    // particles off of it.
-    if (Utils.easeInOutCubic(t) < this._minEasedExplode) return;
-
-    const delta = signedDelta;
-    const parts = Array.from(this.modelManager.getParts().values());
-    if (!parts.length) return;
-    this.modelManager.root.getWorldPosition(this._tmpRootPos);
-
-    const spawnCount = Math.min(10, Math.round(delta * 220));
-    for (let i = 0; i < spawnCount; i++) {
-      const slot = this.slots.find((s) => !s.active);
-      if (!slot) break;
-
-      const piece = parts[(Math.random() * parts.length) | 0];
-      piece.object3D.getWorldPosition(this._tmpVec);
-
-      const outward = this._tmpVec.clone().sub(this._tmpRootPos);
-      if (outward.lengthSq() < 1e-6) outward.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
-      outward.normalize();
-
-      slot.active = true;
-      slot.recalled = false;
-      // Start already a little clear of the spawning piece's own surface —
-      // otherwise, at typical frame rates, the particle is still touching
-      // (or behind) that piece's opaque geometry the moment it first gets
-      // drawn, and depth-testing hides it completely until it escapes.
-      slot.position.copy(this._tmpVec).addScaledVector(outward, 0.5 * this._scale);
-      slot.velocity
-        .copy(outward)
-        .multiplyScalar(Utils.lerp(2.5, 5, Math.random()) * this._scale)
-        .add(
-          new THREE.Vector3(
-            (Math.random() - 0.5) * 0.6 * this._scale,
-            (Math.random() - 0.5) * 0.6 * this._scale,
-            (Math.random() - 0.5) * 0.6 * this._scale
-          )
-        );
-      slot.age = 0;
-      slot.maxAge = Utils.lerp(0.5, 1.1, Math.random());
-      slot.accent = Math.random() < 0.3; // a minority tinted with the site's accent red
-    }
-  }
-
-  /** Scrolling back the other way (reassembling) — instead of leaving
-   *  already-flying dust drifting outward forever (or just fading in
-   *  place, off to the side of the now-closed cube), re-aim every active
-   *  particle's velocity toward the model's current center every frame
-   *  this keeps firing, so they home in and visually get pulled back
-   *  into the cube as it closes up. _update() despawns them once they
-   *  actually arrive. */
-  _recallActiveParticles() {
-    this.modelManager.root.getWorldPosition(this._tmpRootPos);
-    for (const s of this.slots) {
-      if (!s.active) continue;
-      const toCenter = this._tmpRootPos.clone().sub(s.position);
-      if (toCenter.lengthSq() < 1e-6) continue;
-      toCenter.normalize();
-      s.velocity.copy(toCenter).multiplyScalar(Utils.lerp(3, 6, Math.random()) * this._scale);
-      s.recalled = true;
-      // The original maxAge (0.5-1.1s) was budgeted for the short
-      // outward burst only. A particle that had already been flying
-      // outward for a while before the scroll reversed doesn't
-      // necessarily have enough of that lifespan left to travel all the
-      // way back before it expires — it would then fade out mid-flight
-      // via the normal age check below, still outside the cube, which is
-      // exactly the "doesn't go back in" bug. Reset its clock so aging
-      // out can never cut the return trip short; only actually arriving
-      // (see the distance check below) ends a recalled particle's life.
-      s.age = 0;
-      s.maxAge = 6; // generous safety cap — arrival (below) despawns it well before this in the normal case
-    }
-  }
-
-  _update(dt) {
-    this.modelManager.root.getWorldPosition(this._tmpRootPos);
-    for (let i = 0; i < this.count; i++) {
-      const s = this.slots[i];
-      const idx3 = i * 3;
-      if (!s.active) {
-        this._colors[idx3] = this._colors[idx3 + 1] = this._colors[idx3 + 2] = 0;
-        continue;
-      }
-
-      s.age += dt;
-      if (s.age >= s.maxAge) {
-        s.active = false;
-        this._colors[idx3] = this._colors[idx3 + 1] = this._colors[idx3 + 2] = 0;
-        continue;
-      }
-
-      // Drag only applies to the outward burst (a short, energetic flight
-      // that's meant to settle quickly) — a recalled particle has to
-      // cover that same distance again in reverse, and the same drag
-      // bleeds off its speed long before it can get there, leaving it
-      // stalled in open space until age finally cuts it off. Recalled
-      // particles keep their full homing speed the whole way home.
-      if (!s.recalled) s.velocity.multiplyScalar(0.96);
-      s.position.addScaledVector(s.velocity, dt);
-
-      // A recalled particle that's actually made it back to the cube is
-      // done — despawn it here rather than waiting out its normal
-      // age/maxAge fade, so it reads as absorbed into the cube instead
-      // of quietly fading away next to it.
-      if (s.recalled && s.position.distanceToSquared(this._tmpRootPos) < this._arrivalRadius ** 2) {
-        s.active = false;
-        this._colors[idx3] = this._colors[idx3 + 1] = this._colors[idx3 + 2] = 0;
-        continue;
-      }
-
-      const lifeFrac = (1 - s.age / s.maxAge) * this._brightness; // fades out via additive color intensity
-      const color = s.accent ? this.accentColor : this.baseColor;
-      this._positions[idx3] = s.position.x;
-      this._positions[idx3 + 1] = s.position.y;
-      this._positions[idx3 + 2] = s.position.z;
-      this._colors[idx3] = color.r * lifeFrac;
-      this._colors[idx3 + 1] = color.g * lifeFrac;
-      this._colors[idx3 + 2] = color.b * lifeFrac;
-    }
-    this.points.geometry.attributes.position.needsUpdate = true;
-    this.points.geometry.attributes.color.needsUpdate = true;
-  }
-}
-
-/* ==========================================================================
    InteractionController
    The 3D panel is a fixed side panel (not part of the scrollable flow), so
    rotation and page scroll never compete for the same gesture: dragging on
@@ -1275,11 +1024,15 @@ class PanelUIManager {
    scrolling page text. Reads `window.__rubricExplode` — a plain 0..1 number
    MasterExperience updates every tick — to gently speed the particles up
    while a cube is mid-explosion, without any tighter coupling to the 3D
-   scene itself. Deliberately does NOT run inside the always-opaque
-   .viewer-panel (where the cube itself sits) — that panel used to host its
-   own local instance of this dust, but it read as particles drifting out of
-   the cube, so it was removed; the panel now stays a plain backdrop. Skipped
-   entirely for prefers-reduced-motion.
+   scene itself. Deliberately does NOT render inside the .viewer-panel
+   (where the cube itself sits) — that panel used to host its own local
+   instance of this dust, but it read as particles drifting out of the
+   cube, so it was removed. The panel's live rect is also clipped out of
+   this page-wide layer's draw every frame (rather than just trusting the
+   panel's own opaque CSS background to paint over it), since that
+   compositing wasn't reliable on every mobile browser and let dust bleed
+   through around the cube anyway. Skipped entirely for
+   prefers-reduced-motion.
    ========================================================================== */
 /** A dust-particle field drawn into its own canvas. */
 class PhysicsLayer {
@@ -1338,9 +1091,27 @@ class PhysicsLayer {
     }
   }
 
-  draw(accentColor, neutralColor) {
+  /** excludeRect, if given (viewport coordinates, same space as
+   *  getBoundingClientRect()), is clipped out before any particle is
+   *  drawn — used to keep this page-wide dust from ever rendering behind
+   *  the 3D viewer panel, regardless of whether the panel's own opaque
+   *  background actually paints over it (some mobile browsers have been
+   *  unreliable about compositing a `background-attachment:fixed` panel
+   *  over a `position:fixed` canvas, which let dust bleed through around
+   *  the cube). Clipping here is correct independent of any such paint-
+   *  order/engine quirk, since it happens before pixels ever land in the
+   *  canvas at all. */
+  draw(accentColor, neutralColor, excludeRect) {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
+
+    ctx.save();
+    if (excludeRect) {
+      ctx.beginPath();
+      ctx.rect(0, 0, this.width, this.height);
+      ctx.rect(excludeRect.x, excludeRect.y, excludeRect.width, excludeRect.height);
+      ctx.clip('evenodd');
+    }
 
     // Accent-tinted particles brighten as the cube explodes (same signal
     // driving --explode-intensity in style.css), so the particle field and
@@ -1355,6 +1126,7 @@ class PhysicsLayer {
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
   }
 }
 
@@ -1369,6 +1141,12 @@ class PhysicsBackground {
     this.pageLayer = new PhysicsLayer(pageCanvas, { particleCount: pageWide ? 195 : 98, dimFactor: 0.35 });
     this.layers = [this.pageLayer];
 
+    // The 3D viewer panel is meant to stay a plain backdrop for the cube —
+    // this excludes its live on-screen rect from the page-wide dust every
+    // frame (see PhysicsLayer.draw) rather than trusting the panel's own
+    // opaque CSS background to always paint over the dust underneath it.
+    this._excludeEl = document.querySelector('.viewer-panel');
+
     window.addEventListener('resize', () => this.pageLayer.resize());
 
     let lastTime = performance.now();
@@ -1378,9 +1156,10 @@ class PhysicsBackground {
       const explode = window.__rubricExplode || 0;
       const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-glow').trim();
       const neutralColor = getComputedStyle(document.documentElement).getPropertyValue('--ink-faint').trim();
+      const excludeRect = this._excludeEl ? this._excludeEl.getBoundingClientRect() : null;
       for (const layer of this.layers) {
         layer.update(dt, explode);
-        layer.draw(accentColor, neutralColor);
+        layer.draw(accentColor, neutralColor, excludeRect);
       }
       requestAnimationFrame(tick);
     };
@@ -1592,15 +1371,6 @@ class MasterExperience {
     this.ghostAnim = new AnimationManager(this.ghostModel);
     this.rubikAnim = new AnimationManager(this.rubikModel);
 
-    // Bound only to the Ghost Cube (blue) — a dedicated 3D burst effect,
-    // kept fully separate from PhysicsBackground's page-wide 2D dust (see
-    // CubeBurstParticles above). Pieces kick up glowing motes as they
-    // separate, rather than the page's ambient background dust.
-    this.ghostBurst = new CubeBurstParticles(this.sceneManager, this.ghostModel, {
-      accentColor: 0xff5a4a,
-      baseColor: 0x9fd0ff,
-    });
-
     // Red Cube starts hidden/collapsed inside the Ghost Cube until the
     // transition phase grows it out.
     this.rubikModel.root.visible = false;
@@ -1685,8 +1455,6 @@ class MasterExperience {
       // Explode ties directly to scrolling through the Ghost Cube's own
       // hero+physics content — reading through it visibly breaks it apart.
       this.ghostAnim.setProgress(t);
-      this.ghostBurst.setProgress(t);
-      this.ghostBurst.setVisible(true);
       this.ghostModel.root.scale.setScalar(this._grabScale);
 
       this.interactionController.enabled = true;
@@ -1713,10 +1481,6 @@ class MasterExperience {
       // center, instead of snapping to hidden the instant Rubik's Cube phase
       // begins.
       this.ghostAnim.setProgress(1);
-      // No new bursts here (progress is pinned at 1, so setProgress would
-      // see zero delta anyway) — just let any still-fading particles from
-      // the ghost phase finish out naturally alongside the fade.
-      this.ghostBurst.setVisible(true);
       this.ghostModel.setOpacity(1 - eased);
       this.ghostModel.root.scale.setScalar(1);
       this.rubikModel.root.scale.setScalar(Utils.lerp(0.001, 1, eased));
@@ -1765,7 +1529,6 @@ class MasterExperience {
       }
 
       this.ghostModel.root.visible = false;
-      this.ghostBurst.setVisible(false);
       this.rubikModel.root.visible = true;
       this.rubikModel.root.scale.setScalar(this._grabScale);
 
