@@ -1115,14 +1115,19 @@ class PhysicsLayer {
   _spawnParticles() {
     this.particles = [];
     for (let i = 0; i < this.particleCount; i++) {
+      // ~70% plain neutral dust, split the rest evenly between the two
+      // neon accent colors — red (pairs with the blue Ghost Cube) and
+      // violet (still reads clearly against the Rubik phase's own red
+      // backdrop, where a second red tone would just blend in).
+      const roll = Math.random();
       this.particles.push({
         x: Math.random() * this.width,
         y: Math.random() * this.height,
         r: Utils.lerp(0.7, 2.1, Math.random()),
-        vx: (Math.random() - 0.5) * 9.5,
-        vy: (Math.random() - 0.5) * 9.5 - 2.8, // gentle upward drift, like dust
+        vx: (Math.random() - 0.5) * 11,
+        vy: (Math.random() - 0.5) * 11 - 3.2, // gentle upward drift, like dust
         alpha: Utils.lerp(0.1, 0.32, Math.random()),
-        accent: Math.random() < 0.3, // a minority tinted with the site's accent red
+        neon: roll < 0.15 ? 'red' : roll < 0.3 ? 'violet' : null,
       });
     }
   }
@@ -1168,29 +1173,14 @@ class PhysicsLayer {
       ctx.clip('evenodd');
     }
 
-    // Accent-tinted particles brighten as the cube explodes (same signal
-    // driving --explode-intensity in style.css), so the particle field and
-    // the studio backdrop warm up together rather than just the backdrop.
+    // Neon particles brighten as the cube explodes (same signal driving
+    // --explode-intensity in style.css), so the particle field and the
+    // studio backdrop warm up together rather than just the backdrop.
     const accentBoost = 1 + this._lastExplode * 0.7;
     for (const p of this.particles) {
-      if (p.accent) {
-        // Small neon-red glow: a soft radial halo a few times the
-        // particle's own radius, plus a brighter core dot at its center —
-        // reads as a tiny glowing light rather than a flat tinted dot.
-        const alpha = Math.min(1, p.alpha * accentBoost) * this.dimFactor;
-        const glowRadius = p.r * 3.5;
-        const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
-        glow.addColorStop(0, Utils.hexToRgba(accentColor, alpha));
-        glow.addColorStop(1, Utils.hexToRgba(accentColor, 0));
-        ctx.beginPath();
-        ctx.fillStyle = glow;
-        ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.fillStyle = Utils.hexToRgba(accentColor, Math.min(1, alpha * 1.6));
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fill();
+      if (p.neon) {
+        const color = p.neon === 'red' ? accentColor : PhysicsLayer.VIOLET;
+        this._drawNeonDot(ctx, p, color, Math.min(1, p.alpha * accentBoost) * this.dimFactor);
       } else {
         ctx.beginPath();
         ctx.fillStyle = Utils.hexToRgba(neutralColor, p.alpha * this.dimFactor);
@@ -1200,7 +1190,29 @@ class PhysicsLayer {
     }
     ctx.restore();
   }
+
+  /** Small neon glow: a soft radial halo a few times the particle's own
+   *  radius, plus a brighter core dot at its center — reads as a tiny
+   *  glowing light rather than a flat tinted dot. */
+  _drawNeonDot(ctx, p, color, alpha) {
+    const glowRadius = p.r * 3.5;
+    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
+    glow.addColorStop(0, Utils.hexToRgba(color, alpha));
+    glow.addColorStop(1, Utils.hexToRgba(color, 0));
+    ctx.beginPath();
+    ctx.fillStyle = glow;
+    ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.fillStyle = Utils.hexToRgba(color, Math.min(1, alpha * 1.6));
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
+// Fixed neon violet accent, independent of theme — matches the site's own
+// existing violet studio-glow tone (see --studio-glow-1 in style.css).
+PhysicsLayer.VIOLET = '#a855f7';
 
 class PhysicsBackground {
   constructor() {
