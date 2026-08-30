@@ -151,6 +151,9 @@ class SceneManager {
     this._renderCallbacks = [];
     this._resizeObserver = null;
     this._maxPixelRatio = 2;
+
+    this._trailUntil = 0;
+    this._buildTrailQuad();
   }
 
   addRenderCallback(fn) {
@@ -165,13 +168,58 @@ class SceneManager {
     this.camera.updateProjectionMatrix();
   }
 
+  /** A full-screen quad whose only job is to scale the EXISTING framebuffer
+   *  (color + alpha together) toward transparent black each frame it's
+   *  drawn, rather than drawing anything of its own — CustomBlending with
+   *  blendSrc=Zero means its own color/alpha never contributes, only
+   *  `dest * blendDst-factor` does. blendDst=SrcAlpha makes that factor the
+   *  quad material's own opacity, so each pass keeps `opacity` of whatever
+   *  was already drawn and fades the rest toward fully transparent — never
+   *  toward opaque black — which matters here since the canvas has to stay
+   *  see-through to the panel/page background behind the cube. */
+  _buildTrailQuad() {
+    this._trailScene = new THREE.Scene();
+    this._trailCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.82, // fraction of the previous frame retained per pass
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.CustomBlending,
+      blendEquation: THREE.AddEquation,
+      blendSrc: THREE.ZeroFactor,
+      blendDst: THREE.SrcAlphaFactor,
+    });
+    this._trailScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+  }
+
+  /** Turns the drag-rotate motion trail on/off. Called every tick with the
+   *  live "is the user actively dragging" state — staying on for a short
+   *  grace period after release so the trail eases out instead of cutting
+   *  off mid-fade, rather than tracking the raw boolean directly. */
+  setTrailActive(active) {
+    if (active) this._trailUntil = performance.now() + 260;
+  }
+
   start() {
     let lastTime = performance.now();
     const loop = (now) => {
       const dt = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
       for (const cb of this._renderCallbacks) cb(dt, now / 1000);
-      this.renderer.render(this.scene, this.camera);
+
+      if (now < this._trailUntil) {
+        this.renderer.autoClearColor = false;
+        this.renderer.autoClearDepth = true;
+        this.renderer.render(this._trailScene, this._trailCamera);
+        this.renderer.autoClearDepth = false;
+        this.renderer.render(this.scene, this.camera);
+        this.renderer.autoClearColor = true;
+        this.renderer.autoClearDepth = true;
+      } else {
+        this.renderer.render(this.scene, this.camera);
+      }
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -1021,10 +1069,12 @@ class PanelUIManager {
    A cheap 2D-canvas background effect (kept separate from the Three.js
    scene so it never competes for the WebGL context): drifting dust/glitter
    particles in the site's own accent-red and neutral-gray tones, behind the
-   scrolling page text. Reads `window.__rubricExplode` — a plain 0..1 number
-   MasterExperience updates every tick — to gently speed the particles up
-   while a cube is mid-explosion, without any tighter coupling to the 3D
-   scene itself. Deliberately does NOT render inside the .viewer-panel
+   scrolling page text. Reads `window.__rubricExplode` and
+   `window.__rubricRotating` — plain 0..1 numbers MasterExperience updates
+   every tick — to gently speed the particles up while a cube is
+   mid-explosion or actively being hand-rotated, without any tighter
+   coupling to the 3D scene itself. Deliberately does NOT render inside the
+   .viewer-panel
    (where the cube itself sits) — that panel used to host its own local
    instance of this dust, but it read as particles drifting out of the
    cube, so it was removed. The panel's live rect is also clipped out of
@@ -1077,10 +1127,15 @@ class PhysicsLayer {
     }
   }
 
-  update(dt, explode) {
+  update(dt, explode, rotating = 0) {
     this._lastExplode = explode;
+    // Damped rather than snapping straight to 0/1, so the extra drift eases
+    // in on grab and back out on release instead of jumping.
+    this._rotateEnergy = Utils.damp(this._rotateEnergy || 0, rotating, 6, dt);
 
-    const energy = 1 + explode * 1.6; // particles drift a bit faster as pieces separate
+    // particles drift a bit faster as pieces separate, and again while the
+    // cube is actively being dragged/rotated by hand.
+    const energy = 1 + explode * 1.6 + this._rotateEnergy * 1.2;
     for (const p of this.particles) {
       p.x += p.vx * energy * dt;
       p.y += p.vy * energy * dt;
@@ -1154,11 +1209,12 @@ class PhysicsBackground {
       const dt = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
       const explode = window.__rubricExplode || 0;
+      const rotating = window.__rubricRotating || 0;
       const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-glow').trim();
       const neutralColor = getComputedStyle(document.documentElement).getPropertyValue('--ink-faint').trim();
       const excludeRect = this._excludeEl ? this._excludeEl.getBoundingClientRect() : null;
       for (const layer of this.layers) {
-        layer.update(dt, explode);
+        layer.update(dt, explode, rotating);
         layer.draw(accentColor, neutralColor, excludeRect);
       }
       requestAnimationFrame(tick);
@@ -1437,6 +1493,11 @@ class MasterExperience {
     // since drag input is disabled there.
     this._grabScale = Utils.damp(this._grabScale, this.interactionController.isDragging ? 0.965 : 1, 10, dt);
 
+    // Faint motion trail while the cube is actively being hand-rotated —
+    // see SceneManager.setTrailActive for why this refreshes a short grace
+    // window each tick rather than tracking isDragging directly.
+    if (this.interactionController.isDragging) this.sceneManager.setTrailActive(true);
+
     if (phase === 'ghost') {
       if (this._framedFor !== 'ghost') {
         this.cameraController.frameToRange(this.ghostModel.boundingSphere, this.ghostModel.explodedBoundingSphere);
@@ -1549,6 +1610,12 @@ class MasterExperience {
     // `t` in their own phases; Ghost is already fully exploded throughout
     // the transition.
     window.__rubricExplode = phase === 'transition' ? 1 : t;
+
+    // Same idea as __rubricExplode above, but for active hand-rotation
+    // rather than scroll-driven explode — PhysicsBackground reads this to
+    // give the page-wide dust a little extra energy while the cube is
+    // actually being dragged, not during scroll or idle momentum.
+    window.__rubricRotating = this.interactionController.isDragging ? 1 : 0;
 
     // Same value, mirrored onto a CSS custom property so the studio
     // backdrop's red glow (see --studio-glow-2 in style.css) can warm up
