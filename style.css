@@ -35,16 +35,24 @@
   --hud-ink-dim: #d9d1d2;
   --hud-ink-faint: #b9adae;
 
-  /* Studio-light page backdrop (see body, below): a few soft colored glows
-     behind the text — like gelled studio spotlights against a black
+  /* Studio-light page backdrop (see body/.viewer-panel, below): a few soft
+     colored glows — like gelled studio spotlights against a black
      cyclorama — plus a vignette that gently darkens toward the page edges. */
   --studio-glow-1: rgba(168,85,247,.16); /* violet */
   --studio-glow-2: rgba(255,45,59,.14);  /* red */
   --studio-glow-3: rgba(56,130,255,.13); /* blue */
   --studio-vignette: rgba(0,0,0,.55);
+  /* the actual layered gradient, shared verbatim by body AND .viewer-panel
+     (both background-attachment:fixed) so they render pixel-identical and
+     line up seamlessly instead of being two separate backgrounds */
+  --studio-bg:
+    radial-gradient(ellipse 60% 50% at 12% 18%, var(--studio-glow-1), transparent 60%),
+    radial-gradient(ellipse 55% 45% at 88% 12%, var(--studio-glow-2), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 50% 96%, var(--studio-glow-3), transparent 60%),
+    radial-gradient(ellipse 120% 100% at 50% 50%, transparent 55%, var(--studio-vignette) 100%),
+    var(--bg);
 
-  /* Dot/halftone texture (see body::before, below) — faint in dark theme */
-  --dot-color: rgba(255,255,255,.5);
+  /* Halftone dot texture (see body::before, below) — faint in dark theme */
   --halftone-color: rgba(255,255,255,.4);
 }
 
@@ -75,8 +83,7 @@
   --studio-glow-3: rgba(224,18,31,.05);
   --studio-vignette: rgba(30,10,12,.08);
 
-  /* dot/halftone texture reads dark-on-white here instead of light-on-black */
-  --dot-color: rgba(20,10,12,.16);
+  /* halftone texture reads dark-on-white here instead of light-on-black */
   --halftone-color: rgba(224,18,31,.12);
 }
 
@@ -93,15 +100,12 @@ body{ max-width:100%; }
 body{
   margin:0;
   /* studio-light backdrop: a few soft colored glows (violet/red/blue in
-     dark, white/red in light) plus a vignette darkening toward the edges —
-     the 3D viewer panel is transparent (see .viewer-panel) so this shows
-     through continuously behind the cube too, not just behind the text. */
-  background:
-    radial-gradient(ellipse 60% 50% at 12% 18%, var(--studio-glow-1), transparent 60%),
-    radial-gradient(ellipse 55% 45% at 88% 12%, var(--studio-glow-2), transparent 60%),
-    radial-gradient(ellipse 60% 50% at 50% 96%, var(--studio-glow-3), transparent 60%),
-    radial-gradient(ellipse 120% 100% at 50% 50%, transparent 55%, var(--studio-vignette) 100%),
-    var(--bg);
+     dark, white/red in light) plus a vignette darkening toward the edges.
+     .viewer-panel paints this exact same --studio-bg (see there) rather
+     than being transparent — needed so it stays opaque and correctly masks
+     content-col text scrolling underneath it on the mobile stacked layout,
+     while still lining up pixel-for-pixel as one continuous background. */
+  background:var(--studio-bg);
   background-attachment:fixed;
   color:var(--ink);
   font-family:"Inter","Noto Sans Thai","Helvetica Neue",Arial,sans-serif;
@@ -110,22 +114,19 @@ body{
   transition:background-color .4s var(--ease), color .4s var(--ease);
 }
 
-/* Dot-grid + halftone texture: a fine dot grid plus a coarser halftone dot
-   pattern, layered over the studio backdrop above. Masked to fade in only
-   toward the page edges (and stay invisible over the readable center), so
-   it reads as edge decoration rather than noise behind the text. Fixed to
-   the viewport like the rest of the backdrop, and sits behind every real
-   element since it carries no z-index of its own. */
+/* Halftone dot texture, layered over the studio backdrop above. Masked to
+   fade in only toward the page edges (and stay invisible over the readable
+   center), so it reads as edge decoration rather than noise behind the
+   text. Fixed to the viewport like the rest of the backdrop, and sits
+   behind every real element since it carries no z-index of its own. */
 body::before{
   content:"";
   position:fixed;
   inset:0;
   pointer-events:none;
-  background-image:
-    radial-gradient(var(--dot-color) 1px, transparent 1.4px),
-    radial-gradient(var(--halftone-color) 2.5px, transparent 3.2px);
-  background-size:20px 20px, 46px 46px;
-  background-position:0 0, 10px 10px;
+  background-image:radial-gradient(var(--halftone-color) 2.5px, transparent 3.2px);
+  background-size:46px 46px;
+  background-position:10px 10px;
   -webkit-mask-image:radial-gradient(circle at 50% 50%, transparent 30vmin, black 58vmin);
   mask-image:radial-gradient(circle at 50% 50%, transparent 30vmin, black 58vmin);
 }
@@ -272,10 +273,14 @@ button{ font-family:inherit; cursor:pointer; }
   height:100svh;
   overflow:visible;
   flex-shrink:0;
-  /* transparent rather than a solid fill, so body's own fixed studio-light
-     backdrop (see body, above) shows through continuously behind the cube
-     too instead of the panel sitting on top of it as a separate flat patch */
-  background:transparent;
+  /* paints the exact same fixed --studio-bg as body (not transparent) —
+     it must stay opaque so it correctly masks .content-col text scrolling
+     underneath it on the mobile stacked layout (a transparent panel let
+     that text show through, bleeding into the cube); using the identical
+     fixed-position gradient keeps it visually seamless with the rest of
+     the page all the same. */
+  background:var(--studio-bg);
+  background-attachment:fixed;
   z-index:10;
 }
 .viewer-canvas{
