@@ -13,6 +13,7 @@
      PanelUIManager                per-panel HUD, reset button, progress bar
      ResponsiveManager             resize / orientation / DPR handling
      ThemeManager                  shared dark/light site theme toggle
+     InteractiveBackground        mouse/touch parallax on the dot texture
      GlobalChrome                  shared menu, reveals, error overlay
      MasterExperience               the whole journey: Ghost -> 3D transition
                                      -> Rubik's Cube -> explode, one scene
@@ -883,16 +884,65 @@ class PanelUIManager {
 }
 
 /* ==========================================================================
+   InteractiveBackground
+   A small mouse/touch-follow parallax on the dot-grid texture (see
+   body::before in style.css) — moving the cursor or dragging a finger
+   nudges the dots a few pixels toward it, purely as a decorative touch.
+   Writes only two CSS custom properties consumed by body::before's own
+   transform, so nothing else on the page (least of all the text) is ever
+   affected. Damped toward the live pointer position every frame rather
+   than snapping, and skipped entirely for prefers-reduced-motion.
+   ========================================================================== */
+class InteractiveBackground {
+  constructor() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    this.maxShift = 14; // px — subtle, not meant to be attention-grabbing
+    this.targetX = 0;
+    this.targetY = 0;
+    this.currentX = 0;
+    this.currentY = 0;
+
+    const setTarget = (clientX, clientY) => {
+      this.targetX = (clientX / window.innerWidth - 0.5) * 2 * this.maxShift;
+      this.targetY = (clientY / window.innerHeight - 0.5) * 2 * this.maxShift;
+    };
+    window.addEventListener('pointermove', (e) => setTarget(e.clientX, e.clientY), { passive: true });
+    window.addEventListener(
+      'touchmove',
+      (e) => {
+        const touch = e.touches[0];
+        if (touch) setTarget(touch.clientX, touch.clientY);
+      },
+      { passive: true }
+    );
+
+    let lastTime = performance.now();
+    const tick = (now) => {
+      const dt = Math.min((now - lastTime) / 1000, 0.1);
+      lastTime = now;
+      this.currentX = Utils.damp(this.currentX, this.targetX, 5, dt);
+      this.currentY = Utils.damp(this.currentY, this.targetY, 5, dt);
+      document.documentElement.style.setProperty('--dot-shift-x', `${this.currentX.toFixed(2)}px`);
+      document.documentElement.style.setProperty('--dot-shift-y', `${this.currentY.toFixed(2)}px`);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+}
+
+/* ==========================================================================
    GlobalChrome
    Page-wide UI that exists exactly once regardless of how many Experiences
-   are on the page: the full-screen menu, scroll-reveal animations, and the
-   shared error overlay.
+   are on the page: the full-screen menu, scroll-reveal animations, the
+   interactive dot-background parallax, and the shared error overlay.
    ========================================================================== */
 class GlobalChrome {
   constructor() {
     this._renderMath();
     this._bindMenu();
     this._bindReveals();
+    this.interactiveBackground = new InteractiveBackground();
     document.getElementById('error-retry-btn').addEventListener('click', () => window.location.reload());
   }
 

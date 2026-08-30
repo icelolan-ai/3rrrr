@@ -18,6 +18,11 @@
   --ease: cubic-bezier(.16,1,.3,1);
   --header-h: 76px;
 
+  /* driven by InteractiveBackground (script.js) — a small mouse/touch
+     parallax offset applied only to body::before's dot texture */
+  --dot-shift-x: 0px;
+  --dot-shift-y: 0px;
+
   /* the full-screen menu overlay always stays a fixed dark treatment,
      independent of the light/dark site theme, so these never change */
   --menu-ink: #f3f2ef;
@@ -53,7 +58,7 @@
     var(--bg);
 
   /* Dot-grid texture (see body::before, below) — faint in dark theme */
-  --dot-color: rgba(255,255,255,.45);
+  --dot-color: rgba(255,255,255,.32);
 }
 
 /* ==========================================================================
@@ -84,7 +89,7 @@
   --studio-vignette: rgba(30,10,12,.08);
 
   /* dot-grid texture reads dark-on-white here instead of light-on-black */
-  --dot-color: rgba(20,10,12,.16);
+  --dot-color: rgba(20,10,12,.11);
 }
 
 *,*::before,*::after{ box-sizing:border-box; }
@@ -114,38 +119,37 @@ body{
   transition:background-color .4s var(--ease), color .4s var(--ease);
 }
 
-/* Dot-grid texture, layered over the studio backdrop above. Masked to fade
-   in only toward the page edges (and stay invisible over the readable
-   center), so it reads as edge decoration rather than noise behind the
-   text. Fixed to the viewport like the rest of the backdrop, and sits
-   behind every real element since it carries no z-index of its own.
+/* Dot-grid texture, layered over the studio backdrop above. Fixed to the
+   viewport like the rest of the backdrop, and sits behind every real
+   element since it carries no z-index of its own.
 
-   The mask is more than one gradient on purpose: beyond the base
-   center-safe fade, a few scattered patches are intersected on top —
-   some carving the dots away entirely, some just thinning them — so the
-   field reads as uneven/organic rather than a flat, mechanically uniform
-   grid. Each patch after the base uses mask-composite:intersect so it can
-   only ever reduce opacity locally, never add dots outside the base zone. */
+   Rather than a field that's visible almost everywhere with a few holes
+   cut out, the mask here is the reverse: a handful of standalone "reveal"
+   spots (default mask-composite:add, i.e. a plain union) are the ONLY
+   source of opacity, so the dots only ever show up as a few concentrated
+   accents near those spots and stay fully invisible everywhere else —
+   sparser and quieter than a page-wide grid. */
 body::before{
   content:"";
   position:fixed;
   inset:0;
   pointer-events:none;
-  background-image:radial-gradient(var(--dot-color) 1px, transparent 1.4px);
-  background-size:20px 20px;
+  /* subtle mouse/touch-follow parallax (see InteractiveBackground in
+     script.js) — only this texture layer moves, never the text or the
+     studio-glow backdrop underneath it */
+  transform:translate(var(--dot-shift-x), var(--dot-shift-y));
+  background-image:radial-gradient(var(--dot-color) 0.6px, transparent 1px);
+  background-size:32px 32px;
   -webkit-mask-image:
-    radial-gradient(circle at 50% 50%, transparent 30vmin, black 58vmin),
-    radial-gradient(circle 16vmin at 14% 24%, transparent 0%, black 100%),
-    radial-gradient(circle 13vmin at 82% 18%, rgba(0,0,0,.35) 0%, black 100%),
-    radial-gradient(circle 18vmin at 78% 74%, transparent 0%, black 100%),
-    radial-gradient(circle 12vmin at 22% 82%, rgba(0,0,0,.4) 0%, black 100%);
+    radial-gradient(circle 20vmin at 10% 16%, black, transparent 70%),
+    radial-gradient(circle 16vmin at 88% 12%, black, transparent 70%),
+    radial-gradient(circle 22vmin at 80% 85%, black, transparent 70%),
+    radial-gradient(circle 15vmin at 14% 88%, black, transparent 70%);
   mask-image:
-    radial-gradient(circle at 50% 50%, transparent 30vmin, black 58vmin),
-    radial-gradient(circle 16vmin at 14% 24%, transparent 0%, black 100%),
-    radial-gradient(circle 13vmin at 82% 18%, rgba(0,0,0,.35) 0%, black 100%),
-    radial-gradient(circle 18vmin at 78% 74%, transparent 0%, black 100%),
-    radial-gradient(circle 12vmin at 22% 82%, rgba(0,0,0,.4) 0%, black 100%);
-  mask-composite:add,intersect,intersect,intersect,intersect;
+    radial-gradient(circle 20vmin at 10% 16%, black, transparent 70%),
+    radial-gradient(circle 16vmin at 88% 12%, black, transparent 70%),
+    radial-gradient(circle 22vmin at 80% 85%, black, transparent 70%),
+    radial-gradient(circle 15vmin at 14% 88%, black, transparent 70%);
 }
 
 img,canvas{ display:block; max-width:100%; }
@@ -530,7 +534,7 @@ button{ font-family:inherit; cursor:pointer; }
        the dots too instead of reading as a separate plain patch. Desktop
        keeps the plain --studio-bg (unchanged, no override needed there). */
     background:
-      radial-gradient(var(--dot-color) 1px, transparent 1.4px) 0 0/20px 20px,
+      radial-gradient(var(--dot-color) 0.6px, transparent 1px) 0 0/32px 32px,
       var(--studio-bg);
     background-attachment:fixed;
   }
