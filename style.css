@@ -42,6 +42,10 @@
   --studio-glow-2: rgba(255,45,59,.14);  /* red */
   --studio-glow-3: rgba(56,130,255,.13); /* blue */
   --studio-vignette: rgba(0,0,0,.55);
+
+  /* Dot/halftone texture (see body::before, below) — faint in dark theme */
+  --dot-color: rgba(255,255,255,.5);
+  --halftone-color: rgba(255,255,255,.4);
 }
 
 /* ==========================================================================
@@ -70,6 +74,10 @@
   --studio-glow-2: rgba(224,18,31,.10);
   --studio-glow-3: rgba(224,18,31,.05);
   --studio-vignette: rgba(30,10,12,.08);
+
+  /* dot/halftone texture reads dark-on-white here instead of light-on-black */
+  --dot-color: rgba(20,10,12,.16);
+  --halftone-color: rgba(224,18,31,.12);
 }
 
 *,*::before,*::after{ box-sizing:border-box; }
@@ -86,8 +94,8 @@ body{
   margin:0;
   /* studio-light backdrop: a few soft colored glows (violet/red/blue in
      dark, white/red in light) plus a vignette darkening toward the edges —
-     sits behind the content column; the 3D viewer panel keeps its own
-     solid --bg fill on top so this never shows through behind the cube. */
+     the 3D viewer panel is transparent (see .viewer-panel) so this shows
+     through continuously behind the cube too, not just behind the text. */
   background:
     radial-gradient(ellipse 60% 50% at 12% 18%, var(--studio-glow-1), transparent 60%),
     radial-gradient(ellipse 55% 45% at 88% 12%, var(--studio-glow-2), transparent 60%),
@@ -100,6 +108,26 @@ body{
   -webkit-font-smoothing:antialiased;
   line-height:1.5;
   transition:background-color .4s var(--ease), color .4s var(--ease);
+}
+
+/* Dot-grid + halftone texture: a fine dot grid plus a coarser halftone dot
+   pattern, layered over the studio backdrop above. Masked to fade in only
+   toward the page edges (and stay invisible over the readable center), so
+   it reads as edge decoration rather than noise behind the text. Fixed to
+   the viewport like the rest of the backdrop, and sits behind every real
+   element since it carries no z-index of its own. */
+body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  background-image:
+    radial-gradient(var(--dot-color) 1px, transparent 1.4px),
+    radial-gradient(var(--halftone-color) 2.5px, transparent 3.2px);
+  background-size:20px 20px, 46px 46px;
+  background-position:0 0, 10px 10px;
+  -webkit-mask-image:radial-gradient(circle at 50% 50%, transparent 30vmin, black 58vmin);
+  mask-image:radial-gradient(circle at 50% 50%, transparent 30vmin, black 58vmin);
 }
 
 img,canvas{ display:block; max-width:100%; }
