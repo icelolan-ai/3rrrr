@@ -897,7 +897,6 @@ class RippleEffect {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
     this.displacement = document.getElementById('ripple-displacement');
-    this.targets = document.querySelectorAll('.content-col, .outro-col');
     this._raf = null;
     this._lastTrigger = 0;
     this._throttleMs = 350;
@@ -919,7 +918,6 @@ class RippleEffect {
   }
 
   _play() {
-    this.targets.forEach((el) => el.classList.add('rippling'));
     const start = performance.now();
     cancelAnimationFrame(this._raf);
 
@@ -932,7 +930,6 @@ class RippleEffect {
         this._raf = requestAnimationFrame(tick);
       } else {
         this.displacement.setAttribute('scale', '0');
-        this.targets.forEach((el) => el.classList.remove('rippling'));
       }
     };
     this._raf = requestAnimationFrame(tick);

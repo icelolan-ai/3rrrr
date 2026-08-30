@@ -276,11 +276,13 @@ button{ font-family:inherit; cursor:pointer; }
 .reveal{ opacity:0; transform:translateY(26px); transition:opacity .12s linear, transform .12s linear; }
 
 /* Water-ripple effect (see RippleEffect in script.js): tapping/scrolling
-   anywhere outside the 3D viewer briefly applies an SVG displacement-map
-   filter to the page's text content, warping it like a ripple passing
-   through — only added while actually animating, so idle scrolling/reading
-   isn't paying the cost of running everything through an SVG filter. */
-.rippling{ filter:url(#ripple-filter); }
+   anywhere outside the 3D viewer briefly warps the page's text content with
+   an SVG displacement-map filter, like a ripple passing through. The filter
+   is kept permanently attached (it's a no-op at scale=0) rather than
+   toggled on/off per-interaction — toggling it caused a visible one-frame
+   flash where the text vanished each time, from Chrome (re)building the
+   filter's offscreen render buffer from scratch on every trigger. */
+.content-col, .outro-col{ filter:url(#ripple-filter); }
 
 .hud-top{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .instructions{
