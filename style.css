@@ -56,8 +56,8 @@
      backdrop (see body::before / .viewer-panel::before, below) — a subtle
      print-halftone touch underneath the physics particles, not a focal
      pattern of its own. */
-  --dot-color: rgba(255,255,255,.14);
-  --dot-bg: radial-gradient(var(--dot-color) 0.6px, transparent 1px) 0 0/34px 34px;
+  --dot-color: rgba(255,255,255,.4);
+  --dot-bg: radial-gradient(var(--dot-color) 1.1px, transparent 1.4px) 0 0/28px 28px;
 }
 
 /* ==========================================================================
@@ -88,7 +88,7 @@
   --studio-vignette: rgba(30,10,12,.08);
 
   /* dot-grid reads dark-on-white here instead of light-on-black */
-  --dot-color: rgba(20,10,12,.07);
+  --dot-color: rgba(20,10,12,.22);
 }
 
 *,*::before,*::after{ box-sizing:border-box; }
