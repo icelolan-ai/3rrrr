@@ -248,25 +248,6 @@ button{ font-family:inherit; cursor:pointer; }
 .phase-marker{ height:0; margin:0; padding:0; }
 .transition-space{ height:140vh; }
 
-@media (max-width:900px){
-  :root{ --panel-w: 100vw; --panel-w-min: 0px; --viewer-bleed: 0px; }
-  .showcase{ flex-direction:column; }
-  .transition-space{ height:80vh; }
-  /* the 3D panel reads above the text on mobile — reorder visually rather
-     than in the DOM, so the sticky panel still pins/releases correctly
-     against its own section's scroll range */
-  .viewer-panel{ order:1; height:46svh; overflow:hidden; border-bottom:1px solid var(--line); }
-  .content-col{ order:2; width:100%; padding-top:8px; }
-  .showcase:first-of-type .content-col{ padding-top:8px; }
-  .hud{
-    justify-content:flex-start; gap:10px;
-    padding-top:calc(var(--header-h) - 30px);
-  }
-  .hud-bottom{ flex-direction:column; align-items:stretch; gap:10px; }
-  .progress-wrap{ max-width:none; }
-  .qol-controls{ justify-content:flex-end; }
-}
-
 /* ==========================================================================
    Hero — text intro (left column)
    ========================================================================== */
@@ -457,6 +438,48 @@ button{ font-family:inherit; cursor:pointer; }
   padding:28px clamp(20px,5vw,56px) 40px;
   text-align:center; font-size:12px; color:var(--ink-faint);
   border-top:1px solid var(--line);
+}
+
+/* ==========================================================================
+   Mobile layout overrides — placed last so it wins the cascade over every
+   base rule above it (.instructions, .progress-wrap, etc. are redeclared
+   further down the file than the old placement of this block, which meant
+   those later same-specificity base rules were silently winning instead).
+   ========================================================================== */
+@media (max-width:900px){
+  :root{ --panel-w: 100vw; --panel-w-min: 0px; --viewer-bleed: 0px; }
+  .showcase{ flex-direction:column; }
+  .transition-space{ height:80vh; }
+  /* the 3D panel reads above the text on mobile — reorder visually rather
+     than in the DOM, so the sticky panel still pins/releases correctly
+     against its own section's scroll range */
+  .viewer-panel{ order:1; height:46svh; overflow:hidden; }
+  .content-col{ order:2; width:100%; padding-top:8px; }
+  .showcase:first-of-type .content-col{ padding-top:8px; }
+
+  /* the DRAG/SCROLL instructions pill is redundant on a touchscreen (there's
+     no drag-vs-scroll ambiguity to explain) and ate most of the panel's
+     width — drop it and let the tools cluster dock top-right on its own */
+  .instructions{ display:none; }
+  .hud-top{ justify-content:flex-end; }
+
+  .hud{
+    justify-content:flex-start; gap:10px;
+    padding-top:calc(var(--header-h) - 30px);
+  }
+  .hud-bottom{ justify-content:flex-end; }
+
+  /* progress becomes a small vertical strip pinned to the right edge of the
+     screen (not just the panel) — same fill/dot markup and JS as desktop,
+     just rotated, so no script changes are needed for the new orientation */
+  .progress-wrap{
+    position:fixed; right:10px; top:50%; transform:translateY(-50%);
+    flex-direction:column; width:34px; height:130px; min-width:0; max-width:none;
+    padding:14px 0; gap:0; justify-content:center; z-index:55;
+  }
+  .progress-wrap.is-hidden{ transform:translateY(-50%) translateX(8px); }
+  .progress-label-left, .progress-label-right, .progress-percent{ display:none; }
+  .progress-track{ width:100px; height:3px; flex:none; transform:rotate(-90deg); }
 }
 
 /* ==========================================================================
