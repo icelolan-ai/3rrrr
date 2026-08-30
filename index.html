@@ -15,10 +15,20 @@
     } catch (e) {}
   })();
 </script>
-<link rel="stylesheet" href="./style.css?v=9" />
+<link rel="stylesheet" href="./style.css?v=10" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
 </head>
 <body>
+
+  <!-- Hidden SVG filter powering the tap/scroll water-ripple effect: a
+       displacement map that briefly warps whatever it's applied to (see
+       .rippling in style.css and RippleEffect in script.js). -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="ripple-filter" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.008 0.015" numOctaves="2" seed="7" result="rippleNoise" />
+      <feDisplacementMap id="ripple-displacement" in="SourceGraphic" in2="rippleNoise" scale="0" xChannelSelector="R" yChannelSelector="G" />
+    </filter>
+  </svg>
 
   <!-- ============ LOADING OVERLAY ============ -->
   <div id="loading-overlay" class="loading-overlay" role="status" aria-live="polite">
@@ -67,7 +77,6 @@
       <ol class="site-menu-links">
         <li><a href="#ghost-hero" class="site-menu-link" data-menu-link><span class="site-menu-index">01</span>Ghost Cube</a></li>
         <li><a href="#hero" class="site-menu-link" data-menu-link><span class="site-menu-index">02</span>Rubik's Cube</a></li>
-        <li><a href="#deploy-section" class="site-menu-link" data-menu-link><span class="site-menu-index">03</span>Deploy</a></li>
       </ol>
 
       <div class="site-menu-settings">
@@ -243,16 +252,8 @@
 
   </section>
 
-  <!-- ============ DEPLOY / OUTRO (shared, after the showcase) ============ -->
+  <!-- ============ OUTRO (shared, after the showcase) ============ -->
   <main class="outro-col">
-    <section id="deploy-section" class="deploy-section">
-      <div class="deploy-inner reveal">
-        <p class="eyebrow">Ready for GitHub Pages</p>
-        <h2>อัปโหลดแล้วใช้งานได้ทันที</h2>
-        <p class="deploy-sub">โปรเจกต์นี้เป็น static site ล้วน ไม่มี backend ไม่มี Windows path — ดูวิธีติดตั้งแบบละเอียดใน README.md</p>
-      </div>
-    </section>
-
     <footer class="site-footer">
       <span>© 2026 RUBRIC.3D — Built with Three.js</span>
     </footer>
@@ -269,6 +270,6 @@
     }
   }
   </script>
-  <script type="module" src="./script.js?v=8"></script>
+  <script type="module" src="./script.js?v=9"></script>
 </body>
 </html>
