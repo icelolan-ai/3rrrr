@@ -1173,13 +1173,30 @@ class PhysicsLayer {
     // the studio backdrop warm up together rather than just the backdrop.
     const accentBoost = 1 + this._lastExplode * 0.7;
     for (const p of this.particles) {
-      ctx.beginPath();
-      ctx.fillStyle = Utils.hexToRgba(
-        p.accent ? accentColor : neutralColor,
-        (p.accent ? Math.min(1, p.alpha * accentBoost) : p.alpha) * this.dimFactor
-      );
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fill();
+      if (p.accent) {
+        // Small neon-red glow: a soft radial halo a few times the
+        // particle's own radius, plus a brighter core dot at its center —
+        // reads as a tiny glowing light rather than a flat tinted dot.
+        const alpha = Math.min(1, p.alpha * accentBoost) * this.dimFactor;
+        const glowRadius = p.r * 3.5;
+        const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
+        glow.addColorStop(0, Utils.hexToRgba(accentColor, alpha));
+        glow.addColorStop(1, Utils.hexToRgba(accentColor, 0));
+        ctx.beginPath();
+        ctx.fillStyle = glow;
+        ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.fillStyle = Utils.hexToRgba(accentColor, Math.min(1, alpha * 1.6));
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.fillStyle = Utils.hexToRgba(neutralColor, p.alpha * this.dimFactor);
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.restore();
   }
