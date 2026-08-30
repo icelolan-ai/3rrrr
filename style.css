@@ -273,6 +273,17 @@ button{ font-family:inherit; cursor:pointer; }
   background-attachment:fixed;
   z-index:10;
 }
+/* Panel-local twin of #physics-bg-canvas (see PhysicsBackground in
+   script.js). .viewer-panel must stay opaque (see above), which also
+   hides the page-wide physics canvas anywhere underneath it — so the
+   panel gets its own independent dust/shockwave canvas, painted first
+   (before .viewer-canvas below) so it reads as part of the panel's own
+   background rather than over the 3D model. */
+.viewer-bg-canvas{
+  position:absolute; inset:0;
+  width:100%; height:100%;
+  pointer-events:none;
+}
 .viewer-canvas{
   position:absolute; top:0; right:0;
   width:calc(100% + var(--viewer-bleed)); max-width:none; height:100%;
