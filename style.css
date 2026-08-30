@@ -246,7 +246,7 @@ button{ font-family:inherit; cursor:pointer; }
    runway is needed there.
    ========================================================================== */
 .phase-marker{ height:0; margin:0; padding:0; }
-.transition-space{ height:140vh; }
+.transition-space{ height:60vh; }
 
 /* ==========================================================================
    Hero — text intro (left column)
@@ -268,9 +268,12 @@ button{ font-family:inherit; cursor:pointer; }
 .hero-title-accent{ color:var(--ink-dim); font-weight:300; }
 .hero-sub{ color:var(--ink-dim); max-width:52ch; font-size:clamp(15px,1.3vw,17px); margin:0; }
 
-/* scroll-reveal (JS toggles .in-view) */
-.reveal{ opacity:0; transform:translateY(26px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
-.reveal.in-view{ opacity:1; transform:translateY(0); }
+/* scroll-reveal — JS sets opacity/transform directly as a continuous
+   function of each element's own scroll position (see GlobalChrome
+   _bindReveals), so stacked blocks fade in and out one at a time in step
+   with scrolling rather than several snapping to visible together. The
+   short transition just bridges the gap between scroll-event ticks. */
+.reveal{ opacity:0; transform:translateY(26px); transition:opacity .12s linear, transform .12s linear; }
 
 .hud-top{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .instructions{
@@ -449,11 +452,11 @@ button{ font-family:inherit; cursor:pointer; }
 @media (max-width:900px){
   :root{ --panel-w: 100vw; --panel-w-min: 0px; --viewer-bleed: 0px; }
   .showcase{ flex-direction:column; }
-  .transition-space{ height:80vh; }
+  .transition-space{ height:45vh; }
   /* the 3D panel reads above the text on mobile — reorder visually rather
      than in the DOM, so the sticky panel still pins/releases correctly
      against its own section's scroll range */
-  .viewer-panel{ order:1; height:46svh; overflow:hidden; }
+  .viewer-panel{ order:1; height:62svh; overflow:hidden; }
   .content-col{ order:2; width:100%; padding-top:8px; }
   .showcase:first-of-type .content-col{ padding-top:8px; }
 
@@ -469,17 +472,20 @@ button{ font-family:inherit; cursor:pointer; }
   }
   .hud-bottom{ justify-content:flex-end; }
 
-  /* progress becomes a small vertical strip pinned to the right edge of the
-     screen (not just the panel) — same fill/dot markup and JS as desktop,
-     just rotated, so no script changes are needed for the new orientation */
+  /* progress becomes a small, slender vertical strip pinned to the right
+     edge of the screen (not just the panel) — same fill/dot markup and JS
+     as desktop, just rotated, so no script changes are needed for the new
+     orientation. rotate(90deg) (rather than -90deg) puts 0% at the top and
+     100% at the bottom, so the fill and dot travel top-to-bottom as
+     scrolling/exploding progresses. */
   .progress-wrap{
     position:fixed; right:10px; top:50%; transform:translateY(-50%);
-    flex-direction:column; width:34px; height:130px; min-width:0; max-width:none;
-    padding:14px 0; gap:0; justify-content:center; z-index:55;
+    flex-direction:column; width:22px; height:150px; min-width:0; max-width:none;
+    padding:10px 0; gap:0; justify-content:center; z-index:55;
   }
   .progress-wrap.is-hidden{ transform:translateY(-50%) translateX(8px); }
   .progress-label-left, .progress-label-right, .progress-percent{ display:none; }
-  .progress-track{ width:100px; height:3px; flex:none; transform:rotate(-90deg); }
+  .progress-track{ width:128px; height:2px; flex:none; transform:rotate(90deg); }
 }
 
 /* ==========================================================================
