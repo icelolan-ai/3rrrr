@@ -476,6 +476,15 @@ button{ font-family:inherit; cursor:pointer; }
 .reset-btn{ font-size:12px; padding:10px 18px; white-space:nowrap; }
 .reset-icon{ font-size:14px; }
 
+.explore-toggle-btn{ font-size:12px; padding:10px 18px; white-space:nowrap; }
+.explore-toggle-icon{ font-size:14px; }
+.explore-toggle-btn[aria-pressed="true"]{ border-color:var(--accent); color:var(--accent-glow); }
+.explore-toggle-btn:disabled{ opacity:.4; pointer-events:none; }
+
+/* A quiet cue (not the button's own state, easy to miss out of the corner
+   of an eye) that Explore Mode has decoupled the scene from scroll. */
+.viewer-panel.explore-active .instructions{ border-color:var(--accent); color:var(--accent-glow); }
+
 /* ==========================================================================
    Sliding tools tray (reset / env / fullscreen), toggled by one button
    ========================================================================== */
