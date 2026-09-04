@@ -10,7 +10,8 @@
      AnimationManager           progress -> per-cubelet transform interpolation
      MasterScrollController      one continuous scroll -> phase + progress
      InteractionController        drag rotate / pinch zoom / gesture gating
-     PieceHoverLabel                raycasts on hover, labels the piece type
+     PieceHoverLabel                raycasts on hover, labels + glows the piece
+     SelectionManager                click/tap select: glow + dim the rest
      PanelUIManager                per-panel HUD, reset button, progress bar
      ResponsiveManager             resize / orientation / DPR handling
      ThemeManager                  shared dark/light site theme toggle
@@ -58,6 +59,64 @@ const Utils = {
     const g = (int >> 8) & 255;
     const b = int & 255;
     return `rgba(${r},${g},${b},${alpha})`;
+  },
+  /** Walks up from a raycast hit to the nearest ancestor registered as one
+   *  of `model`'s own named pieces — a raycast hit can land on a mesh
+   *  nested a level or two below the node actually tracked in
+   *  `model.parts`. Shared by every piece-level interaction (hover,
+   *  selection, ...) so they all resolve "which piece is this" identically. */
+  findPieceName: (model, object3D) => {
+    let obj = object3D;
+    while (obj) {
+      if (model.parts.has(obj.name)) return obj.name;
+      obj = obj.parent;
+    }
+    return null;
+  },
+  /** Lazily creates (and caches on the mesh itself) the one material clone
+   *  used for every per-mesh visual override — hover glow, selection glow,
+   *  selection dimming. Shared across all of them so a given mesh is ever
+   *  cloned at most once no matter which interaction touches it first;
+   *  each system just sets whichever of emissiveIntensity/opacity it owns
+   *  on the same clone instance. The TRUE original is captured here too,
+   *  the one moment `mesh.material` is guaranteed to still be it (the very
+   *  first time any interaction ever touches this mesh) — hover and
+   *  selection can otherwise hand a mesh off to each other (e.g. clicking
+   *  a piece while it's mid-hover) before either has restored it, and
+   *  reading `mesh.material` fresh at that point would capture the OTHER
+   *  system's clone as "the original" instead of the real shared material. */
+  getInteractiveClone: (mesh) => {
+    if (!mesh.userData._interactiveClone) {
+      mesh.userData._originalMaterial = mesh.material;
+      const clone = mesh.material.clone();
+      clone.emissive = new THREE.Color(0xffffff);
+      clone.emissiveIntensity = 0;
+      mesh.userData._interactiveClone = clone;
+    }
+    return mesh.userData._interactiveClone;
+  },
+  /** The true original material for a mesh ever touched by an interactive
+   *  override — see getInteractiveClone. */
+  getOriginalMaterial: (mesh) => {
+    Utils.getInteractiveClone(mesh);
+    return mesh.userData._originalMaterial;
+  },
+  /** Swaps `mesh.material` to its shared interactive clone AND resets that
+   *  clone to a clean baseline (emissiveIntensity 0, opacity matching the
+   *  true original) before handing it back — hover only ever drives
+   *  emissiveIntensity, selection's dim role only ever drives opacity, so
+   *  without this reset a mesh handed from one role to another (e.g.
+   *  deselected-and-dimmed, then later hovered; or selected right after
+   *  being dimmed by a previous selection) would carry over a stale value
+   *  on whichever channel the new role never touches. Returns the true
+   *  original material so callers can still restore to it later. */
+  activateInteractiveClone: (mesh) => {
+    const original = Utils.getOriginalMaterial(mesh);
+    const clone = Utils.getInteractiveClone(mesh);
+    clone.emissiveIntensity = 0;
+    clone.opacity = original.opacity;
+    mesh.material = clone;
+    return original;
   },
 };
 
@@ -846,12 +905,16 @@ class InteractionController {
    there rather than fighting or duplicating it.
    ========================================================================== */
 class PieceHoverLabel {
-  constructor(sceneManager, panelRoot, { interactionController, getActiveModel }) {
+  constructor(sceneManager, panelRoot, { interactionController, getActiveModel, getSelectedName }) {
     if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
 
     this.sceneManager = sceneManager;
     this.interactionController = interactionController;
     this.getActiveModel = getActiveModel;
+    // Optional — while something is selected (see SelectionManager), hover
+    // stands down entirely rather than fighting over the same per-mesh
+    // material clone's emissiveIntensity.
+    this.getSelectedName = getSelectedName || (() => null);
     this.raycaster = new THREE.Raycaster();
     this.pointerNdc = new THREE.Vector2();
     this._hasPointer = false;
@@ -861,7 +924,9 @@ class PieceHoverLabel {
     // materials) — mutating a hovered piece's material in place would light
     // up every other piece using that same instance. Instead each mesh gets
     // its own cloned material, created lazily once and cached on the mesh
-    // (`userData._hoverClone`) so repeated hovers over the same piece never
+    // (`userData._interactiveClone`, shared with SelectionManager so a
+    // piece's clone is only ever created once regardless of which system
+    // touches it first) so repeated hovers over the same piece never
     // re-clone, and swapped in/out of `mesh.material` rather than ever
     // touching the shared original.
     this._hoveredName = null;
@@ -900,14 +965,7 @@ class PieceHoverLabel {
 
     object3D.traverse((obj) => {
       if (!obj.isMesh || !obj.material) return;
-      if (!obj.userData._hoverClone) {
-        const clone = obj.material.clone();
-        clone.emissive = new THREE.Color(0xffffff);
-        clone.emissiveIntensity = 0;
-        obj.userData._hoverClone = clone;
-      }
-      this._highlightMeshes.push({ mesh: obj, original: obj.material });
-      obj.material = obj.userData._hoverClone;
+      this._highlightMeshes.push({ mesh: obj, original: Utils.activateInteractiveClone(obj) });
     });
   }
 
@@ -943,15 +1001,6 @@ class PieceHoverLabel {
     return model._pieceCoordRange;
   }
 
-  _findPieceName(model, object3D) {
-    let obj = object3D;
-    while (obj) {
-      if (model.parts.has(obj.name)) return obj.name;
-      obj = obj.parent;
-    }
-    return null;
-  }
-
   _classify(model, name) {
     const match = /_(-?\d+)_(-?\d+)_(-?\d+)$/.exec(name);
     if (!match) return null;
@@ -966,17 +1015,19 @@ class PieceHoverLabel {
 
   /** Resolves the piece actually under the cursor right now — null whenever
    *  hover shouldn't count at all (no pointer, actively dragging, no active
-   *  model such as mid-transition). Kept separate from the label/highlight
-   *  logic below so BOTH always see the same "nothing hovered" state and
-   *  restore correctly, rather than each early-returning independently. */
+   *  model such as mid-transition, or something is currently selected).
+   *  Kept separate from the label/highlight logic below so BOTH always see
+   *  the same "nothing hovered" state and restore correctly, rather than
+   *  each early-returning independently. */
   _resolveHoveredPiece() {
+    if (this.getSelectedName()) return { model: null, pieceName: null };
     if (!this._hasPointer || this.interactionController.isDragging) return { model: null, pieceName: null };
     const model = this.getActiveModel();
     if (!model) return { model: null, pieceName: null };
 
     this.raycaster.setFromCamera(this.pointerNdc, this.sceneManager.camera);
     const hits = this.raycaster.intersectObject(model.root, true);
-    const pieceName = hits.length ? this._findPieceName(model, hits[0].object) : null;
+    const pieceName = hits.length ? Utils.findPieceName(model, hits[0].object) : null;
     return { model, pieceName };
   }
 
@@ -984,9 +1035,19 @@ class PieceHoverLabel {
     const { model, pieceName } = this._resolveHoveredPiece();
 
     if (pieceName !== this._hoveredName) {
+      if (this.getSelectedName()) {
+        // A selection now owns material assignment for whatever piece we
+        // were showing (see SelectionManager) — just zero our own glow
+        // contribution and drop our bookkeeping without touching
+        // mesh.material, rather than restoring it out from under selection.
+        for (const { mesh } of this._highlightMeshes) mesh.material.emissiveIntensity = 0;
+        this._highlightMeshes = [];
+        this._hoverIntensity = 0;
+      } else {
+        const part = pieceName ? model.parts.get(pieceName) : null;
+        this._setHighlightTarget(part ? part.object3D : null);
+      }
       this._hoveredName = pieceName;
-      const part = pieceName ? model.parts.get(pieceName) : null;
-      this._setHighlightTarget(part ? part.object3D : null);
     }
 
     const targetIntensity = pieceName ? 1 : 0;
@@ -1005,10 +1066,185 @@ class PieceHoverLabel {
     this.label.style.top = `${this._clientY - this._panelRect.top + 14}px`;
     this.label.classList.add('is-visible');
   }
+
+  /** Instantly (no damping) restores whatever's currently highlighted —
+   *  called when the active model is about to change out from under this
+   *  interaction (e.g. entering the ghost/rubik transition), so nothing is
+   *  left mid-fade on a clone right as the model's own opacity crossfade
+   *  needs to touch the true original. A no-op on touch devices, where the
+   *  constructor bailed out before any of this state was ever created. */
+  forceRestoreImmediate() {
+    if (!this._highlightMeshes) return;
+    for (const { mesh, original } of this._highlightMeshes) mesh.material = original;
+    this._highlightMeshes = [];
+    this._hoveredName = null;
+    this._hoverIntensity = 0;
+    this._hide();
+  }
 }
 // Peak emissive intensity at full hover — subtle, reads as "slightly
 // brighter" rather than a glowing highlight.
 PieceHoverLabel.EMISSIVE_INTENSITY = 0.32;
+
+/* ==========================================================================
+   SelectionManager
+   Click (mouse) or tap (touch) a piece to select it: it gets a steady glow
+   (stronger than the transient hover glow) while every OTHER piece of the
+   same model dims — the touch-friendly equivalent of hover, since a
+   touchscreen has no hover state at all. Works identically on both the
+   Ghost Cube and the Rubik's Cube. Clicking the selected piece again, or an
+   empty area of the canvas, deselects and restores everything.
+
+   A "click" is distinguished from a drag-to-rotate release purely by total
+   pointer movement since pointerdown (InteractionController itself flips
+   `isDragging` true on every pointerdown, click or drag alike, so that flag
+   can't be used to tell them apart) — above a small pixel threshold it's a
+   drag and never reaches selection at all.
+   ========================================================================== */
+class SelectionManager {
+  constructor(sceneManager, { getActiveModel }) {
+    this.sceneManager = sceneManager;
+    this.canvas = sceneManager.canvas;
+    this.getActiveModel = getActiveModel;
+    this.raycaster = new THREE.Raycaster();
+
+    this.selectedModel = null;
+    this.selectedName = null;
+    // Damped 0..1 strengths so both the dim and the selection glow ease in
+    // and out rather than snapping — restored to original materials only
+    // once fully faded back to 0, so a quick re-select never flickers.
+    this._dimAmount = 0;
+    this._glowAmount = 0;
+    this._dimMeshes = []; // [{ mesh, original, originalOpacity }] — every OTHER piece
+    this._glowMeshes = []; // [{ mesh, original }] — the selected piece itself
+
+    this._downPointerId = null;
+    this._downX = 0;
+    this._downY = 0;
+    this._moved = false;
+
+    this.canvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch' && !e.isPrimary) return; // second pinch finger
+      this._downPointerId = e.pointerId;
+      this._downX = e.clientX;
+      this._downY = e.clientY;
+      this._moved = false;
+    });
+    window.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== this._downPointerId) return;
+      if (Math.hypot(e.clientX - this._downX, e.clientY - this._downY) > 6) this._moved = true;
+    });
+    window.addEventListener('pointerup', (e) => {
+      if (e.pointerId !== this._downPointerId) return;
+      this._downPointerId = null;
+      if (!this._moved) this._handleClick(e.clientX, e.clientY);
+    });
+
+    sceneManager.addRenderCallback((dt) => this._update(dt));
+  }
+
+  _handleClick(clientX, clientY) {
+    const model = this.getActiveModel();
+    if (!model) return;
+
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+    this.raycaster.setFromCamera(ndc, this.sceneManager.camera);
+    const hits = this.raycaster.intersectObject(model.root, true);
+    const pieceName = hits.length ? Utils.findPieceName(model, hits[0].object) : null;
+
+    if (!pieceName || pieceName === this.selectedName) {
+      this.deselect();
+    } else {
+      this.select(model, pieceName);
+    }
+  }
+
+  select(model, pieceName) {
+    this.selectedModel = model;
+    this.selectedName = pieceName;
+    this._rebuildTargets();
+  }
+
+  deselect() {
+    this.selectedName = null;
+    // meshes are only actually restored once _update() finishes damping
+    // both amounts back to 0 — see _update.
+  }
+
+  /** Re-derives which meshes need dimming vs. glowing for the CURRENT
+   *  selection. Safe to call whenever the selection changes; each mesh's
+   *  clone is shared with hover (see Utils.activateInteractiveClone), so
+   *  this never creates a duplicate clone for a piece hover has already
+   *  touched, and always resets to a clean baseline on hand-off. */
+  _rebuildTargets() {
+    for (const { mesh, original } of this._dimMeshes) mesh.material = original;
+    for (const { mesh, original } of this._glowMeshes) mesh.material = original;
+    this._dimMeshes = [];
+    this._glowMeshes = [];
+    if (!this.selectedName || !this.selectedModel) return;
+
+    for (const [name, part] of this.selectedModel.parts.entries()) {
+      const isSelected = name === this.selectedName;
+      part.object3D.traverse((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        const original = Utils.activateInteractiveClone(obj);
+        if (isSelected) {
+          this._glowMeshes.push({ mesh: obj, original });
+        } else {
+          this._dimMeshes.push({ mesh: obj, original, originalOpacity: original.opacity });
+        }
+      });
+    }
+  }
+
+  _update(dt) {
+    const target = this.selectedName ? 1 : 0;
+    this._dimAmount = Utils.damp(this._dimAmount, target, 10, dt);
+    this._glowAmount = Utils.damp(this._glowAmount, target, 10, dt);
+    if (Math.abs(this._dimAmount - target) < 0.01) this._dimAmount = target;
+    if (Math.abs(this._glowAmount - target) < 0.01) this._glowAmount = target;
+
+    for (const { mesh, originalOpacity } of this._dimMeshes) {
+      mesh.material.opacity = Utils.lerp(originalOpacity, SelectionManager.DIM_OPACITY, this._dimAmount);
+    }
+    for (const { mesh } of this._glowMeshes) {
+      mesh.material.emissiveIntensity = SelectionManager.GLOW_INTENSITY * this._glowAmount;
+    }
+
+    if (target === 0 && this._dimAmount === 0 && this._glowAmount === 0) this._restoreAll();
+  }
+
+  _restoreAll() {
+    for (const { mesh, original } of this._dimMeshes) mesh.material = original;
+    for (const { mesh, original } of this._glowMeshes) mesh.material = original;
+    this._dimMeshes = [];
+    this._glowMeshes = [];
+    this.selectedModel = null;
+  }
+
+  /** Instantly (no damping) restores everything and clears the selection —
+   *  called when the active model is about to change out from under this
+   *  interaction (e.g. entering the ghost/rubik transition), so a piece
+   *  isn't left mid-fade on a clone right as the model's own opacity
+   *  crossfade needs to touch the true original. */
+  forceRestoreImmediate() {
+    this._restoreAll();
+    this.selectedName = null;
+    this._dimAmount = 0;
+    this._glowAmount = 0;
+  }
+}
+// "Slightly dimmed" per the design brief — noticeably faded but every piece
+// stays legible, unlike a dedicated isolate mode's much deeper fade.
+SelectionManager.DIM_OPACITY = 0.42;
+// Stronger and steadier than the transient hover glow, so a selected piece
+// unmistakably reads as "locked in" rather than just currently under the
+// pointer.
+SelectionManager.GLOW_INTENSITY = 0.55;
 
 /* ==========================================================================
    ThemeManager
@@ -1536,16 +1772,21 @@ class MasterExperience {
 
     this.interactionController = new InteractionController(this.canvas, this.cameraController);
 
+    // Ambiguous mid-fade during the transition (both models visible at
+    // once), so both hover and selection are simply off there rather than
+    // guessing which model the cursor/tap is "over".
+    const getActiveModel = () => {
+      if (this._phase === 'ghost') return this.ghostModel;
+      if (this._phase === 'rubik') return this.rubikModel;
+      return null;
+    };
+
+    this.selectionManager = new SelectionManager(this.sceneManager, { getActiveModel });
+
     this.pieceHoverLabel = new PieceHoverLabel(this.sceneManager, this.panelRoot, {
       interactionController: this.interactionController,
-      // Ambiguous mid-fade during the transition (both models visible at
-      // once), so hover is simply off there rather than guessing which one
-      // the cursor is "over".
-      getActiveModel: () => {
-        if (this._phase === 'ghost') return this.ghostModel;
-        if (this._phase === 'rubik') return this.rubikModel;
-        return null;
-      },
+      getActiveModel,
+      getSelectedName: () => this.selectionManager.selectedName,
     });
 
     this.scrollController = new MasterScrollController(this.sectionEl, {
@@ -1688,6 +1929,15 @@ class MasterExperience {
     }
 
     if (phase !== 'transition') this._transitionBase = null;
+    // Entering the transition immediately (not damped) restores any
+    // selected/hovered piece to its true original material — the ghost
+    // model's own crossfade (setOpacity, below) mutates opacity on that
+    // true original, and a piece still mid-fade back from a clone would
+    // silently stop tracking that fade for the rest of the transition.
+    if (phase === 'transition' && this._phase !== 'transition') {
+      this.selectionManager.forceRestoreImmediate();
+      this.pieceHoverLabel.forceRestoreImmediate?.();
+    }
     this._phase = phase;
 
     // A plain global rather than a tighter coupling: PhysicsBackground (a
