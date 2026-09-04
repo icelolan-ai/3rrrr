@@ -1660,6 +1660,10 @@ class PanelUIManager {
 
     this.exploreBtn = this.panelRoot.querySelector('.explore-toggle-btn');
     this.exploreBtn.addEventListener('click', () => this.onToggleExplore?.());
+
+    this.copyViewBtn = this.panelRoot.querySelector('.copy-view-btn');
+    this._copyViewDefaultTitle = this.copyViewBtn.title;
+    this.copyViewBtn.addEventListener('click', () => this.onCopyViewRequested?.());
   }
 
   updateProgressUI(progress) {
@@ -1700,6 +1704,29 @@ class PanelUIManager {
   setExploreEnterable(enterable) {
     if (this.exploreBtn.getAttribute('aria-pressed') === 'true') return;
     this.exploreBtn.disabled = !enterable;
+  }
+
+  /** Shareable view state (see MasterExperience.copyView): "which model"
+   *  is ambiguous mid ghost/rubik cross-fade, so copying is disabled for
+   *  the same transition window as entering Explore Mode. */
+  setCopyViewEnabled(enabled) {
+    this.copyViewBtn.disabled = !enabled;
+  }
+
+  /** Brief visual confirmation that COPY VIEW actually copied something —
+   *  reuses the same accent-ring [aria-pressed] styling every other icon
+   *  toggle already gets, just pulsed temporarily rather than reflecting
+   *  persistent state. Safe to call again mid-flash (e.g. rapid re-clicks):
+   *  each call just restarts the same timer rather than stacking. */
+  flashCopied() {
+    const btn = this.copyViewBtn;
+    btn.setAttribute('aria-pressed', 'true');
+    btn.title = 'คัดลอกลิงก์แล้ว!';
+    clearTimeout(this._copyFlashTimer);
+    this._copyFlashTimer = setTimeout(() => {
+      btn.removeAttribute('aria-pressed');
+      btn.title = this._copyViewDefaultTitle;
+    }, 1500);
   }
 }
 
@@ -2119,6 +2146,25 @@ class MasterScrollController {
     this.current = { phase, t: Utils.clamp(t, 0, 1), global: s, journey };
     return this.current;
   }
+
+  /** Reverse of update()'s own phase/t derivation — the window.scrollY that
+   *  would naturally produce the given phase+t, used only by the shareable-
+   *  view-state restore (MasterExperience._restoreViewFromURL). Scrolling
+   *  the real page to this position (rather than some parallel "restored"
+   *  flag) keeps phase/t driven through the exact same scroll-position
+   *  source of truth as everything else — only the camera pose, which was
+   *  never scroll-derived to begin with, needs restoring separately. */
+  scrollYFor(phase, t) {
+    this._onScroll(); // refresh _bounds against current layout before reversing them
+    const { d1, d2, d3 } = this._bounds;
+    const tt = Utils.clamp(t, 0, 1);
+    let global;
+    if (phase === 'ghost') global = d1 * tt;
+    else if (phase === 'transition') global = d1 + (d2 - d1) * tt;
+    else global = d2 + (d3 - d2) * tt; // 'rubik'
+    const sectionTopInDocument = this.sectionEl.getBoundingClientRect().top + window.scrollY;
+    return sectionTopInDocument + Utils.clamp(global, 0, d3);
+  }
 }
 
 /* ==========================================================================
@@ -2220,10 +2266,13 @@ class MasterExperience {
     });
     this.panelUI.onResetRequested = () => this.reset();
     this.panelUI.onToggleExplore = () => this.toggleExploreMode();
+    this.panelUI.onCopyViewRequested = () => this.copyView();
 
     this.cameraPresetManager = new CameraPresetManager(this.panelRoot, {
       cameraController: this.cameraController,
     });
+
+    this._restoreViewFromURL();
 
     this.sceneManager.addRenderCallback((dt) => this._tick(dt));
     this.sceneManager.start();
@@ -2268,6 +2317,7 @@ class MasterExperience {
     }
 
     this.panelUI.setExploreEnterable(live.phase !== 'transition');
+    this.panelUI.setCopyViewEnabled(live.phase !== 'transition');
 
     // Tactile "grab" feedback while actively dragging whichever model is
     // currently orbit-able; a no-op (settles to 1) during the transition,
@@ -2440,6 +2490,81 @@ class MasterExperience {
   reset() {
     this.cameraController.reset();
     this.cameraPresetManager.clearActive();
+  }
+
+  /** Shareable view state: captures which model is showing, its explode
+   *  progress, and the live camera pose into URL params, updates the
+   *  address bar to match (replaceState — no new history entry, no
+   *  reload) and copies that URL to the clipboard. Disabled during the
+   *  transition phase (see the setCopyViewEnabled call in _tick) since
+   *  "which model" is ambiguous mid cross-fade. Deliberately reads
+   *  _lastAppliedT/_phase (whatever's actually on screen right now,
+   *  frozen-during-Explore-Mode included) rather than the live scroll
+   *  position — this is a snapshot of what the user is looking AT, not
+   *  of where the page happens to be scrolled to. */
+  copyView() {
+    if (this._phase === 'transition') return;
+    const cam = this.cameraController;
+    const params = new URLSearchParams();
+    params.set('model', this._phase);
+    params.set('explode', this._lastAppliedT.toFixed(4));
+    params.set('theta', cam.theta.toFixed(4));
+    params.set('phi', cam.phi.toFixed(4));
+    params.set('zoom', cam.radius.toFixed(3));
+    params.set('tx', cam.target.x.toFixed(3));
+    params.set('ty', cam.target.y.toFixed(3));
+    params.set('tz', cam.target.z.toFixed(3));
+    const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+
+    history.replaceState(null, '', url);
+    navigator.clipboard?.writeText(url).catch(() => {});
+    this.panelUI.flashCopied();
+  }
+
+  /** Other half of shareable view state: on load, if the URL carries a
+   *  valid view (see copyView above), scrolls the real page to the
+   *  position that naturally produces that model+explode progress —
+   *  keeping phase/t driven through MasterScrollController's own scroll-
+   *  position source of truth rather than a parallel "restored" flag —
+   *  then applies the saved camera pose on top (never scroll-derived to
+   *  begin with, so it's restored separately). Runs once, before the
+   *  render loop starts, so the very first frame already reflects it
+   *  (still hidden behind the loading overlay at that point) instead of
+   *  visibly snapping into place. Silently does nothing if the URL has no
+   *  recognizable view state. */
+  _restoreViewFromURL() {
+    const params = new URLSearchParams(window.location.search);
+    const model = params.get('model');
+    if (model !== 'ghost' && model !== 'rubik') return;
+    const explode = parseFloat(params.get('explode'));
+    const theta = parseFloat(params.get('theta'));
+    const phi = parseFloat(params.get('phi'));
+    const radius = parseFloat(params.get('zoom'));
+    if (![explode, theta, phi, radius].every(Number.isFinite)) return;
+    const target = new THREE.Vector3(
+      parseFloat(params.get('tx')) || 0,
+      parseFloat(params.get('ty')) || 0,
+      parseFloat(params.get('tz')) || 0
+    );
+
+    const scrollY = this.scrollController.scrollYFor(model, explode);
+    window.scrollTo({ top: scrollY, left: 0, behavior: 'instant' });
+    // Skip the scroll controller's own damped catch-up for this one-time
+    // restore — the very first frame should already show the exact
+    // restored state, not visibly ease into it.
+    this.scrollController._onScroll();
+    this.scrollController.smoothedGlobal = this.scrollController.targetGlobal;
+
+    const activeModel = model === 'ghost' ? this.ghostModel : this.rubikModel;
+    this.cameraController.frameToRange(activeModel.boundingSphere, activeModel.explodedBoundingSphere);
+    this.cameraController.setPose(
+      theta,
+      Utils.clamp(phi, this.cameraController.minPhi, this.cameraController.maxPhi),
+      Utils.clamp(radius, this.cameraController.minRadius, this.cameraController.maxRadius),
+      target
+    );
+    this.cameraController.markUserZoomed();
+    this._framedFor = model;
   }
 
   /** Freezes the current object/explosion state and decouples it from
