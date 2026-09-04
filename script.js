@@ -1196,6 +1196,9 @@ class SelectionManager {
 
     this.selectedModel = null;
     this.selectedName = null;
+    // When true, non-selected pieces dim to ISOLATE_OPACITY instead of the
+    // normal (much lighter) DIM_OPACITY — see setIsolate().
+    this.isolate = false;
     // Damped 0..1 strengths so both the dim and the selection glow ease in
     // and out rather than snapping — restored to original materials only
     // once fully faded back to 0, so a quick re-select never flickers.
@@ -1257,8 +1260,19 @@ class SelectionManager {
 
   deselect() {
     this.selectedName = null;
+    this.isolate = false;
     // meshes are only actually restored once _update() finishes damping
     // both amounts back to 0 — see _update.
+  }
+
+  /** Toggles the deep "isolate" dim (~10-20% opacity) on every OTHER piece
+   *  vs. the normal, much lighter selection dim — a no-op with nothing
+   *  selected. The transition eases the same way either direction, via the
+   *  existing _dimAmount damping in _update(), since only the TARGET
+   *  opacity changes here, not which meshes are being dimmed. */
+  setIsolate(enabled) {
+    if (!this.selectedName) return;
+    this.isolate = enabled;
   }
 
   /** Re-derives which meshes need dimming vs. glowing for the CURRENT
@@ -1294,8 +1308,9 @@ class SelectionManager {
     if (Math.abs(this._dimAmount - target) < 0.01) this._dimAmount = target;
     if (Math.abs(this._glowAmount - target) < 0.01) this._glowAmount = target;
 
+    const dimOpacity = this.isolate ? SelectionManager.ISOLATE_OPACITY : SelectionManager.DIM_OPACITY;
     for (const { mesh, originalOpacity } of this._dimMeshes) {
-      mesh.material.opacity = Utils.lerp(originalOpacity, SelectionManager.DIM_OPACITY, this._dimAmount);
+      mesh.material.opacity = Utils.lerp(originalOpacity, dimOpacity, this._dimAmount);
     }
     for (const { mesh } of this._glowMeshes) {
       mesh.material.emissiveIntensity = SelectionManager.GLOW_INTENSITY * this._glowAmount;
@@ -1320,13 +1335,17 @@ class SelectionManager {
   forceRestoreImmediate() {
     this._restoreAll();
     this.selectedName = null;
+    this.isolate = false;
     this._dimAmount = 0;
     this._glowAmount = 0;
   }
 }
 // "Slightly dimmed" per the design brief — noticeably faded but every piece
-// stays legible, unlike a dedicated isolate mode's much deeper fade.
+// stays legible, unlike a dedicated isolate mode's much deeper fade below.
 SelectionManager.DIM_OPACITY = 0.42;
+// Isolate mode's much deeper fade (per the design brief's 0.1-0.2 range) —
+// the selected piece reads as the one thing left to look at.
+SelectionManager.ISOLATE_OPACITY = 0.12;
 // Stronger and steadier than the transient hover glow, so a selected piece
 // unmistakably reads as "locked in" rather than just currently under the
 // pointer.
@@ -1366,8 +1385,9 @@ class PartInspector {
       </dl>
       <div class="part-inspector-actions">
         <button type="button" class="btn part-inspector-focus">FOCUS</button>
-        <button type="button" class="btn part-inspector-reset">RESET</button>
+        <button type="button" class="btn part-inspector-isolate">ISOLATE</button>
       </div>
+      <button type="button" class="btn part-inspector-reset">RESET</button>
     `;
     panelRoot.appendChild(this.root);
 
@@ -1377,6 +1397,7 @@ class PartInspector {
     this._progEl = this.root.querySelector('.part-inspector-progress');
     this._matEl = this.root.querySelector('.part-inspector-material');
     this._focusBtn = this.root.querySelector('.part-inspector-focus');
+    this._isolateBtn = this.root.querySelector('.part-inspector-isolate');
 
     this._focusBtn.addEventListener('click', () => {
       const { selectedModel, selectedName } = this.selectionManager;
@@ -1393,6 +1414,11 @@ class PartInspector {
       this._updateFocusLabel();
     });
 
+    this._isolateBtn.addEventListener('click', () => {
+      this.selectionManager.setIsolate(!this.selectionManager.isolate);
+      this._updateIsolateLabel();
+    });
+
     this.root
       .querySelector('.part-inspector-reset')
       .addEventListener('click', () => this.selectionManager.deselect());
@@ -1402,6 +1428,12 @@ class PartInspector {
     const focused = this.cameraController.isFocused;
     this._focusBtn.textContent = focused ? 'BACK TO MODEL' : 'FOCUS';
     this._focusBtn.setAttribute('aria-pressed', String(focused));
+  }
+
+  _updateIsolateLabel() {
+    const isolated = this.selectionManager.isolate;
+    this._isolateBtn.textContent = isolated ? 'EXIT ISOLATE' : 'ISOLATE';
+    this._isolateBtn.setAttribute('aria-pressed', String(isolated));
   }
 
   /** `explodeProgress` is the active model's own current 0..1 scroll
@@ -1418,10 +1450,13 @@ class PartInspector {
     }
     if (!isOpen) {
       // Deselecting (RESET, clicking elsewhere, or a phase-boundary force
-      // restore) always drops any active focus too — nothing left to focus on.
+      // restore) always drops any active focus/isolate too — nothing left
+      // to focus on or isolate (SelectionManager itself already resets
+      // `isolate` on deselect; this just keeps the button label in sync).
       if (this.cameraController.isFocused) this.cameraController.unfocus();
       this._focusedName = null;
       this._updateFocusLabel();
+      this._updateIsolateLabel();
       return;
     }
 
@@ -1443,6 +1478,7 @@ class PartInspector {
       }
     }
     this._updateFocusLabel();
+    this._updateIsolateLabel();
 
     this._typeEl.textContent = Utils.classifyPiece(selectedModel, selectedName) || '—';
     this._nameEl.textContent = selectedName;
