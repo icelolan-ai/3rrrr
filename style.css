@@ -400,12 +400,22 @@ button{ font-family:inherit; cursor:pointer; }
   transition:opacity .3s var(--ease), transform .3s var(--ease);
 }
 .part-inspector.is-open{ opacity:1; transform:translateX(0); pointer-events:auto; }
+.part-inspector-close{
+  position:absolute; top:14px; right:14px;
+  width:24px; height:24px;
+  display:flex; align-items:center; justify-content:center;
+  border-radius:50%; border:1px solid var(--line);
+  background:rgba(255,255,255,.05);
+  color:var(--ink-faint); font-size:11px; line-height:1;
+  transition:border-color .25s var(--ease), color .25s var(--ease);
+}
+.part-inspector-close:hover{ border-color:var(--accent); color:var(--ink); }
 .part-inspector-type{
-  margin:0; font-size:11px; font-weight:700; letter-spacing:.1em;
+  margin:0; padding-right:30px; font-size:11px; font-weight:700; letter-spacing:.1em;
   text-transform:uppercase; color:var(--accent-glow);
 }
 .part-inspector-name{
-  margin:4px 0 14px; font-size:14px; font-weight:600; color:var(--ink);
+  margin:4px 0 14px; padding-right:30px; font-size:14px; font-weight:600; color:var(--ink);
   word-break:break-all; line-height:1.35;
 }
 .part-inspector-rows{ margin:0 0 16px; display:flex; flex-direction:column; gap:8px; }
@@ -488,7 +498,8 @@ button{ font-family:inherit; cursor:pointer; }
 .qol-controls{ display:flex; gap:8px; }
 
 /* ==========================================================================
-   Sliding tools tray (reset / env / fullscreen), toggled by one button
+   Sliding tools tray (reset / capture / env / fullscreen), toggled by one
+   button
    ========================================================================== */
 .tools-cluster{ display:flex; align-items:center; gap:8px; }
 
@@ -497,8 +508,8 @@ button{ font-family:inherit; cursor:pointer; }
   max-width:0; opacity:0; overflow:hidden;
   transition:max-width .45s var(--ease), opacity .3s var(--ease), margin-right .45s var(--ease);
 }
-/* Three 42px icon buttons + 2 gaps = 142px content. */
-.tools-tray.open{ max-width:170px; opacity:1; margin-right:2px; }
+/* Four 42px icon buttons + 3 gaps = 192px content. */
+.tools-tray.open{ max-width:220px; opacity:1; margin-right:2px; }
 .tools-tray > .btn{ flex-shrink:0; }
 
 .tools-toggle-icon{ display:inline-block; transition:transform .35s var(--ease); font-size:18px; line-height:1; }
