@@ -625,9 +625,10 @@ class CameraController {
     this.autoRotate = true;
     this.autoRotateSpeed = 0.12;
 
-    // Once the user manually zooms (pinch or ctrl/shift+wheel), the
-    // scroll-linked auto zoom (see setExplodeRadius) stops touching
-    // targetRadius, so it doesn't fight their input; reset() re-enables it.
+    // Once the user manually zooms (pinch, ctrl/shift+wheel, or a camera
+    // preset), the scroll-linked auto zoom (see setExplodeRadius) stops
+    // touching targetRadius, so it doesn't fight their input; reset()
+    // re-enables it.
     this._userZoomed = false;
 
     this._defaults = null;
@@ -1604,9 +1605,9 @@ class ThemeManager {
 /* ==========================================================================
    PanelUIManager
    HUD chrome for ONE viewer panel: progress bar, instructions fade, and its
-   reset/env/fullscreen/autorotate/tools-tray buttons. Scoped to that panel's
-   own DOM subtree (via class selectors, since a page can host several
-   panels at once) rather than page-wide IDs.
+   env/fullscreen/autorotate/capture/tools-tray buttons. Scoped to that
+   panel's own DOM subtree (via class selectors, since a page can host
+   several panels at once) rather than page-wide IDs.
    ========================================================================== */
 class PanelUIManager {
   constructor(panelRoot, { cameraController, lightingManager }) {
@@ -1622,10 +1623,6 @@ class PanelUIManager {
 
     this._bindButtons();
     this._instructionsFaded = false;
-    // Swapped in while Explore Mode is active (see setExploreActive) — the
-    // default hint's "SCROLL = เล่นแอนิเมชัน" would otherwise read as a lie
-    // once scroll no longer drives the explosion/zoom timeline.
-    this._defaultInstructionsHTML = this.instructions.innerHTML;
   }
 
   _bindButtons() {
@@ -1658,12 +1655,9 @@ class PanelUIManager {
       toolsToggle.setAttribute('aria-expanded', String(open));
     });
 
-    this.exploreBtn = this.panelRoot.querySelector('.explore-toggle-btn');
-    this.exploreBtn.addEventListener('click', () => this.onToggleExplore?.());
-
-    this.copyViewBtn = this.panelRoot.querySelector('.copy-view-btn');
-    this._copyViewDefaultTitle = this.copyViewBtn.title;
-    this.copyViewBtn.addEventListener('click', () => this.onCopyViewRequested?.());
+    this.captureBtn = this.panelRoot.querySelector('.capture-btn');
+    this._captureDefaultTitle = this.captureBtn.title;
+    this.captureBtn.addEventListener('click', () => this.onCaptureRequested?.());
   }
 
   updateProgressUI(progress) {
@@ -1681,51 +1675,19 @@ class PanelUIManager {
     }
   }
 
-  setExploreActive(active) {
-    this.exploreBtn.setAttribute('aria-pressed', String(active));
-    // Icon-only button (lives in .tools-tray) — state reads from the
-    // accent-ring aria-pressed styling, same as env-btn/autorotate-btn;
-    // the tooltip still spells it out for anyone hovering/long-pressing.
-    this.exploreBtn.title = active ? 'ออกจากโหมดสำรวจอิสระ' : 'เข้าสู่โหมดสำรวจอิสระ ไม่ผูกกับการเลื่อนหน้าจอ';
-    this.panelRoot.classList.toggle('explore-active', active);
-    this.instructions.innerHTML = active
-      ? `<span class="instr-item"><span class="instr-key">EXPLORE</span> โหมดสำรวจอิสระ</span>
-         <span class="instr-sep">/</span>
-         <span class="instr-item"><span class="instr-key">TAP</span> = เลือกชิ้นส่วน</span>`
-      : this._defaultInstructionsHTML;
-    // Exiting must always stay possible regardless of what phase the live
-    // scroll is currently sitting on — only ENTERING is phase-gated.
-    if (active) this.exploreBtn.disabled = false;
-  }
-
-  /** Only meaningful while NOT already exploring — greys the button out
-   *  during the ghost/rubik cross-fade, where entering Explore Mode isn't
-   *  offered (see MasterExperience.enterExploreMode). */
-  setExploreEnterable(enterable) {
-    if (this.exploreBtn.getAttribute('aria-pressed') === 'true') return;
-    this.exploreBtn.disabled = !enterable;
-  }
-
-  /** Shareable view state (see MasterExperience.copyView): "which model"
-   *  is ambiguous mid ghost/rubik cross-fade, so copying is disabled for
-   *  the same transition window as entering Explore Mode. */
-  setCopyViewEnabled(enabled) {
-    this.copyViewBtn.disabled = !enabled;
-  }
-
-  /** Brief visual confirmation that COPY VIEW actually copied something —
+  /** Brief visual confirmation that CAPTURE actually saved something —
    *  reuses the same accent-ring [aria-pressed] styling every other icon
    *  toggle already gets, just pulsed temporarily rather than reflecting
    *  persistent state. Safe to call again mid-flash (e.g. rapid re-clicks):
    *  each call just restarts the same timer rather than stacking. */
-  flashCopied() {
-    const btn = this.copyViewBtn;
+  flashCaptured() {
+    const btn = this.captureBtn;
     btn.setAttribute('aria-pressed', 'true');
-    btn.title = 'คัดลอกลิงก์แล้ว!';
-    clearTimeout(this._copyFlashTimer);
-    this._copyFlashTimer = setTimeout(() => {
+    btn.title = 'บันทึกภาพแล้ว!';
+    clearTimeout(this._captureFlashTimer);
+    this._captureFlashTimer = setTimeout(() => {
       btn.removeAttribute('aria-pressed');
-      btn.title = this._copyViewDefaultTitle;
+      btn.title = this._captureDefaultTitle;
     }, 1500);
   }
 }
@@ -2146,25 +2108,6 @@ class MasterScrollController {
     this.current = { phase, t: Utils.clamp(t, 0, 1), global: s, journey };
     return this.current;
   }
-
-  /** Reverse of update()'s own phase/t derivation — the window.scrollY that
-   *  would naturally produce the given phase+t, used only by the shareable-
-   *  view-state restore (MasterExperience._restoreViewFromURL). Scrolling
-   *  the real page to this position (rather than some parallel "restored"
-   *  flag) keeps phase/t driven through the exact same scroll-position
-   *  source of truth as everything else — only the camera pose, which was
-   *  never scroll-derived to begin with, needs restoring separately. */
-  scrollYFor(phase, t) {
-    this._onScroll(); // refresh _bounds against current layout before reversing them
-    const { d1, d2, d3 } = this._bounds;
-    const tt = Utils.clamp(t, 0, 1);
-    let global;
-    if (phase === 'ghost') global = d1 * tt;
-    else if (phase === 'transition') global = d1 + (d2 - d1) * tt;
-    else global = d2 + (d3 - d2) * tt; // 'rubik'
-    const sectionTopInDocument = this.sectionEl.getBoundingClientRect().top + window.scrollY;
-    return sectionTopInDocument + Utils.clamp(global, 0, d3);
-  }
 }
 
 /* ==========================================================================
@@ -2187,16 +2130,7 @@ class MasterExperience {
     this._framedFor = null;
     this._grabScale = 1;
     this._transitionBase = null;
-
-    // Explore Mode (see enterExploreMode/exitExploreMode below): decouples
-    // the 3D scene from scroll while active, so the user can freely orbit/
-    // zoom/select/inspect a resting model without the explode/reassemble
-    // timeline or scroll-linked zoom fighting their input.
-    this.exploreMode = false;
-    this._exploreFrozen = null; // { phase, t } captured the instant Explore Mode was entered
-    this._exploreReturnTween = null; // smooth hand-back to live scroll on exit
-    this._liveScroll = null; // the raw, un-frozen scrollController.update() result, refreshed every tick
-    this._lastAppliedT = 0; // whichever t (live/frozen/tweened) actually drove the scene last tick
+    this._lastAppliedT = 0; // the active model's own explode progress, last tick (used for the capture filename)
   }
 
   async init() {
@@ -2265,14 +2199,11 @@ class MasterExperience {
       lightingManager: this.lightingManager,
     });
     this.panelUI.onResetRequested = () => this.reset();
-    this.panelUI.onToggleExplore = () => this.toggleExploreMode();
-    this.panelUI.onCopyViewRequested = () => this.copyView();
+    this.panelUI.onCaptureRequested = () => this.captureScreenshot();
 
     this.cameraPresetManager = new CameraPresetManager(this.panelRoot, {
       cameraController: this.cameraController,
     });
-
-    this._restoreViewFromURL();
 
     this.sceneManager.addRenderCallback((dt) => this._tick(dt));
     this.sceneManager.start();
@@ -2288,36 +2219,7 @@ class MasterExperience {
   }
 
   _tick(dt) {
-    const live = this.scrollController.update(dt);
-    this._liveScroll = live;
-    let { phase, t } = live;
-
-    if (this.exploreMode) {
-      // Explore Mode: freeze exactly what phase/t drives (explosion state +
-      // scroll-linked zoom) at whatever they were the instant Explore Mode
-      // was entered. `live` above stays fresh every tick regardless — so
-      // exitExploreMode() knows where to smoothly resume from — it just
-      // never reaches the branch below while active. Manual orbit/zoom/
-      // selection/hover/focus/isolate are untouched, since none of them
-      // read `phase`/`t`.
-      phase = this._exploreFrozen.phase;
-      t = this._exploreFrozen.t;
-    } else if (this._exploreReturnTween) {
-      // Hand-back from Explore Mode: ease the frozen explosion/zoom state
-      // toward wherever live scroll actually is now, rather than snapping —
-      // AnimationManager.setProgress() has no damping of its own, so without
-      // this the pieces would jump straight to the live position the instant
-      // Explore Mode turned off.
-      const tw = this._exploreReturnTween;
-      tw.elapsed += dt;
-      const k = Utils.clamp(tw.elapsed / tw.duration, 0, 1);
-      phase = tw.phase;
-      t = Utils.lerp(tw.from, tw.to, Utils.easeInOutCubic(k));
-      if (k >= 1) this._exploreReturnTween = null;
-    }
-
-    this.panelUI.setExploreEnterable(live.phase !== 'transition');
-    this.panelUI.setCopyViewEnabled(live.phase !== 'transition');
+    const { phase, t, journey } = this.scrollController.update(dt);
 
     // Tactile "grab" feedback while actively dragging whichever model is
     // currently orbit-able; a no-op (settles to 1) during the transition,
@@ -2468,12 +2370,8 @@ class MasterExperience {
 
     // Background storytelling (see style.css --studio-glow-*/--studio-
     // vignette/--dot-color, plus LightingManager.setStoryProgress below):
-    // driven by the OVERALL page journey (live.journey, 0..1 across the
-    // whole section) rather than the per-phase/frozen `t` above — the
-    // reader keeps scrolling normally even in Explore Mode, and the
-    // backdrop should keep tracking that regardless of whether the 3D
-    // scene itself is currently frozen.
-    const journey = live.journey;
+    // driven by the OVERALL page journey (0..1 across the whole section)
+    // rather than the per-phase `t` above.
     document.documentElement.style.setProperty('--journey-progress', String(journey));
     // Shaping curves kept in JS (not replicated as nested calc()/clamp() in
     // two separate theme blocks in CSS): --journey-rich only turns on for
@@ -2492,117 +2390,39 @@ class MasterExperience {
     this.cameraPresetManager.clearActive();
   }
 
-  /** Shareable view state: captures which model is showing, its explode
-   *  progress, and the live camera pose into URL params, updates the
-   *  address bar to match (replaceState — no new history entry, no
-   *  reload) and copies that URL to the clipboard. Disabled during the
-   *  transition phase (see the setCopyViewEnabled call in _tick) since
-   *  "which model" is ambiguous mid cross-fade. Deliberately reads
-   *  _lastAppliedT/_phase (whatever's actually on screen right now,
-   *  frozen-during-Explore-Mode included) rather than the live scroll
-   *  position — this is a snapshot of what the user is looking AT, not
-   *  of where the page happens to be scrolled to. */
-  copyView() {
-    if (this._phase === 'transition') return;
-    const cam = this.cameraController;
-    const params = new URLSearchParams();
-    params.set('model', this._phase);
-    params.set('explode', this._lastAppliedT.toFixed(4));
-    params.set('theta', cam.theta.toFixed(4));
-    params.set('phi', cam.phi.toFixed(4));
-    params.set('zoom', cam.radius.toFixed(3));
-    params.set('tx', cam.target.x.toFixed(3));
-    params.set('ty', cam.target.y.toFixed(3));
-    params.set('tz', cam.target.z.toFixed(3));
-    const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
-
-    history.replaceState(null, '', url);
-    navigator.clipboard?.writeText(url).catch(() => {});
-    this.panelUI.flashCopied();
-  }
-
-  /** Other half of shareable view state: on load, if the URL carries a
-   *  valid view (see copyView above), scrolls the real page to the
-   *  position that naturally produces that model+explode progress —
-   *  keeping phase/t driven through MasterScrollController's own scroll-
-   *  position source of truth rather than a parallel "restored" flag —
-   *  then applies the saved camera pose on top (never scroll-derived to
-   *  begin with, so it's restored separately). Runs once, before the
-   *  render loop starts, so the very first frame already reflects it
-   *  (still hidden behind the loading overlay at that point) instead of
-   *  visibly snapping into place. Silently does nothing if the URL has no
-   *  recognizable view state. */
-  _restoreViewFromURL() {
-    const params = new URLSearchParams(window.location.search);
-    const model = params.get('model');
-    if (model !== 'ghost' && model !== 'rubik') return;
-    const explode = parseFloat(params.get('explode'));
-    const theta = parseFloat(params.get('theta'));
-    const phi = parseFloat(params.get('phi'));
-    const radius = parseFloat(params.get('zoom'));
-    if (![explode, theta, phi, radius].every(Number.isFinite)) return;
-    const target = new THREE.Vector3(
-      parseFloat(params.get('tx')) || 0,
-      parseFloat(params.get('ty')) || 0,
-      parseFloat(params.get('tz')) || 0
-    );
-
-    const scrollY = this.scrollController.scrollYFor(model, explode);
-    window.scrollTo({ top: scrollY, left: 0, behavior: 'instant' });
-    // Skip the scroll controller's own damped catch-up for this one-time
-    // restore — the very first frame should already show the exact
-    // restored state, not visibly ease into it.
-    this.scrollController._onScroll();
-    this.scrollController.smoothedGlobal = this.scrollController.targetGlobal;
-
-    const activeModel = model === 'ghost' ? this.ghostModel : this.rubikModel;
-    this.cameraController.frameToRange(activeModel.boundingSphere, activeModel.explodedBoundingSphere);
-    this.cameraController.setPose(
-      theta,
-      Utils.clamp(phi, this.cameraController.minPhi, this.cameraController.maxPhi),
-      Utils.clamp(radius, this.cameraController.minRadius, this.cameraController.maxRadius),
-      target
-    );
-    this.cameraController.markUserZoomed();
-    this._framedFor = model;
-  }
-
-  /** Freezes the current object/explosion state and decouples it from
-   *  scroll — the page can still scroll normally, but the 3D timeline stops
-   *  following it until exitExploreMode(). A no-op while already exploring,
-   *  or while the live scroll is mid-transition (the button is disabled
-   *  then too — see the `setExploreEnterable` call in _tick — since
-   *  "exploring" only makes sense for one resting model, not the Ghost/
-   *  Rubik cross-fade). */
-  enterExploreMode() {
-    if (this.exploreMode || (this._liveScroll?.phase ?? this._phase) === 'transition') return;
-    this.exploreMode = true;
-    this._exploreReturnTween = null;
-    this._exploreFrozen = { phase: this._phase, t: this._lastAppliedT };
-    this.panelUI.setExploreActive(true);
-  }
-
-  /** Hands control back to scroll, easing the frozen explosion/zoom state
-   *  toward the current live scroll position rather than snapping (see the
-   *  _exploreReturnTween handling in _tick). If the user scrolled far enough
-   *  during Explore Mode that the live phase now belongs to a different
-   *  model entirely, that's too big a jump to tween frame-by-frame — resume
-   *  driving directly from the live position instead. */
-  exitExploreMode() {
-    if (!this.exploreMode) return;
-    this.exploreMode = false;
-    const live = this._liveScroll || this._exploreFrozen;
-    this._exploreReturnTween =
-      live.phase === this._exploreFrozen.phase
-        ? { phase: live.phase, from: this._exploreFrozen.t, to: live.t, elapsed: 0, duration: 0.6 }
-        : null;
-    this._exploreFrozen = null;
-    this.panelUI.setExploreActive(false);
-  }
-
-  toggleExploreMode() {
-    if (this.exploreMode) this.exitExploreMode();
-    else this.enterExploreMode();
+  /** VERSION 9 spec: saves the current 3D view — camera angle, explosion
+   *  progress, lighting — as a downloaded PNG. All three are inherent to
+   *  whatever's actually rendered right now, so nothing special is needed
+   *  to "include" them beyond capturing a fresh frame.
+   *
+   *  Deliberately does NOT set `preserveDrawingBuffer: true` on the
+   *  renderer (see SceneManager) — that keeps an extra framebuffer copy
+   *  every single frame for the rare case someone hits Capture, a real
+   *  ongoing GPU/memory cost for a one-off action. Instead this is a
+   *  dedicated capture path: render one fresh frame directly, then read
+   *  the canvas back with toBlob() in the same callstack, before the next
+   *  requestAnimationFrame can draw over it — toBlob()'s pixel read
+   *  happens synchronously at call time (only the PNG encoding is async),
+   *  so this doesn't need preserveDrawingBuffer to work correctly.
+   *
+   *  Captures only the WebGL canvas itself, per the spec's "prioritize
+   *  the WebGL canvas" — not the page's separate 2D dust canvas, and not
+   *  the HUD chrome (which was never part of this canvas's own pixel
+   *  buffer to begin with, so there's nothing to hide for this). The
+   *  renderer's alpha:true clear color means the exported PNG has a
+   *  transparent background behind the cube. */
+  captureScreenshot() {
+    this.sceneManager.renderer.render(this.sceneManager.scene, this.sceneManager.camera);
+    this.canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rubric-3d-${this._phase}-${Math.round(this._lastAppliedT * 100)}pct.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+    this.panelUI.flashCaptured();
   }
 }
 

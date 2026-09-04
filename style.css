@@ -487,18 +487,8 @@ button{ font-family:inherit; cursor:pointer; }
 
 .qol-controls{ display:flex; gap:8px; }
 
-/* Lives inside .tools-tray now (see below) — a plain .btn-icon toggle,
-   the same accent-ring/pressed styling as env-btn etc. comes for free. */
-.explore-toggle-btn:disabled{ opacity:.4; pointer-events:none; }
-.copy-view-btn:disabled{ opacity:.4; pointer-events:none; }
-
-/* A quiet cue (not the button's own state, easy to miss out of the corner
-   of an eye) that Explore Mode has decoupled the scene from scroll. */
-.viewer-panel.explore-active .instructions{ border-color:var(--accent); color:var(--accent-glow); }
-
 /* ==========================================================================
-   Sliding tools tray (reset / copy view / explore / env / fullscreen),
-   toggled by one button
+   Sliding tools tray (reset / env / fullscreen), toggled by one button
    ========================================================================== */
 .tools-cluster{ display:flex; align-items:center; gap:8px; }
 
@@ -507,20 +497,12 @@ button{ font-family:inherit; cursor:pointer; }
   max-width:0; opacity:0; overflow:hidden;
   transition:max-width .45s var(--ease), opacity .3s var(--ease), margin-right .45s var(--ease);
 }
-/* Five 42px icon buttons + 4 gaps = ~242px content — reset was converted
-   from a text pill to a plain icon here specifically to keep the tray
-   compact enough to still fit next to tools-toggle/camera-preset-toggle
-   on a narrow mobile viewport once copy-view-btn joined it (see the
-   max-width:420px override below, which is the tighter of the two). */
-.tools-tray.open{ max-width:280px; opacity:1; margin-right:2px; }
+/* Three 42px icon buttons + 2 gaps = 142px content. */
+.tools-tray.open{ max-width:170px; opacity:1; margin-right:2px; }
 .tools-tray > .btn{ flex-shrink:0; }
 
 .tools-toggle-icon{ display:inline-block; transition:transform .35s var(--ease); font-size:18px; line-height:1; }
 .tools-toggle[aria-expanded="true"] .tools-toggle-icon{ transform:rotate(90deg); }
-
-@media (max-width:420px){
-  .tools-tray.open{ max-width:270px; }
-}
 
 /* ==========================================================================
    Camera preset popover (HERO / TOP / DETAIL / EXPLODED)
