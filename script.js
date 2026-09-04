@@ -1679,7 +1679,10 @@ class PanelUIManager {
 
   setExploreActive(active) {
     this.exploreBtn.setAttribute('aria-pressed', String(active));
-    this.exploreBtn.querySelector('.explore-toggle-label').textContent = active ? 'EXIT EXPLORE' : 'EXPLORE MODE';
+    // Icon-only button (lives in .tools-tray) — state reads from the
+    // accent-ring aria-pressed styling, same as env-btn/autorotate-btn;
+    // the tooltip still spells it out for anyone hovering/long-pressing.
+    this.exploreBtn.title = active ? 'ออกจากโหมดสำรวจอิสระ' : 'เข้าสู่โหมดสำรวจอิสระ ไม่ผูกกับการเลื่อนหน้าจอ';
     this.panelRoot.classList.toggle('explore-active', active);
     this.instructions.innerHTML = active
       ? `<span class="instr-item"><span class="instr-key">EXPLORE</span> โหมดสำรวจอิสระ</span>
