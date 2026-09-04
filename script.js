@@ -856,6 +856,18 @@ class PieceHoverLabel {
     this.pointerNdc = new THREE.Vector2();
     this._hasPointer = false;
 
+    // Both GLBs share ONE material instance across every piece (27 cubelets
+    // on the Rubik's Cube, 26 on the Ghost Cube each sharing 1 of only 2
+    // materials) — mutating a hovered piece's material in place would light
+    // up every other piece using that same instance. Instead each mesh gets
+    // its own cloned material, created lazily once and cached on the mesh
+    // (`userData._hoverClone`) so repeated hovers over the same piece never
+    // re-clone, and swapped in/out of `mesh.material` rather than ever
+    // touching the shared original.
+    this._hoveredName = null;
+    this._highlightMeshes = []; // [{ mesh, original }] for the currently hovered piece
+    this._hoverIntensity = 0;
+
     this.label = document.createElement('div');
     this.label.className = 'piece-hover-label';
     panelRoot.appendChild(this.label);
@@ -875,7 +887,34 @@ class PieceHoverLabel {
       this._hide();
     });
 
-    sceneManager.addRenderCallback(() => this._update());
+    sceneManager.addRenderCallback((dt) => this._update(dt));
+  }
+
+  /** Swaps in per-mesh cloned materials for every mesh under `object3D`
+   *  (null clears the current highlight) — always restores the previous
+   *  target's meshes to their original shared material first. */
+  _setHighlightTarget(object3D) {
+    for (const { mesh, original } of this._highlightMeshes) mesh.material = original;
+    this._highlightMeshes = [];
+    if (!object3D) return;
+
+    object3D.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      if (!obj.userData._hoverClone) {
+        const clone = obj.material.clone();
+        clone.emissive = new THREE.Color(0xffffff);
+        clone.emissiveIntensity = 0;
+        obj.userData._hoverClone = clone;
+      }
+      this._highlightMeshes.push({ mesh: obj, original: obj.material });
+      obj.material = obj.userData._hoverClone;
+    });
+  }
+
+  _applyHoverIntensity(t) {
+    for (const { mesh } of this._highlightMeshes) {
+      mesh.material.emissiveIntensity = PieceHoverLabel.EMISSIVE_INTENSITY * t;
+    }
   }
 
   _hide() {
@@ -925,20 +964,36 @@ class PieceHoverLabel {
     return 'แกนกลาง · Core';
   }
 
-  _update() {
-    if (!this._hasPointer || this.interactionController.isDragging) {
-      this._hide();
-      return;
-    }
+  /** Resolves the piece actually under the cursor right now — null whenever
+   *  hover shouldn't count at all (no pointer, actively dragging, no active
+   *  model such as mid-transition). Kept separate from the label/highlight
+   *  logic below so BOTH always see the same "nothing hovered" state and
+   *  restore correctly, rather than each early-returning independently. */
+  _resolveHoveredPiece() {
+    if (!this._hasPointer || this.interactionController.isDragging) return { model: null, pieceName: null };
     const model = this.getActiveModel();
-    if (!model) {
-      this._hide();
-      return;
-    }
+    if (!model) return { model: null, pieceName: null };
 
     this.raycaster.setFromCamera(this.pointerNdc, this.sceneManager.camera);
     const hits = this.raycaster.intersectObject(model.root, true);
     const pieceName = hits.length ? this._findPieceName(model, hits[0].object) : null;
+    return { model, pieceName };
+  }
+
+  _update(dt) {
+    const { model, pieceName } = this._resolveHoveredPiece();
+
+    if (pieceName !== this._hoveredName) {
+      this._hoveredName = pieceName;
+      const part = pieceName ? model.parts.get(pieceName) : null;
+      this._setHighlightTarget(part ? part.object3D : null);
+    }
+
+    const targetIntensity = pieceName ? 1 : 0;
+    this._hoverIntensity = Utils.damp(this._hoverIntensity, targetIntensity, 14, dt);
+    if (Math.abs(this._hoverIntensity - targetIntensity) < 0.01) this._hoverIntensity = targetIntensity;
+    if (this._highlightMeshes.length) this._applyHoverIntensity(this._hoverIntensity);
+
     const label = pieceName ? this._classify(model, pieceName) : null;
     if (!label) {
       this._hide();
@@ -951,6 +1006,9 @@ class PieceHoverLabel {
     this.label.classList.add('is-visible');
   }
 }
+// Peak emissive intensity at full hover — subtle, reads as "slightly
+// brighter" rather than a glowing highlight.
+PieceHoverLabel.EMISSIVE_INTENSITY = 0.32;
 
 /* ==========================================================================
    ThemeManager
