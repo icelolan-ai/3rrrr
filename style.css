@@ -476,6 +476,15 @@ button{ font-family:inherit; cursor:pointer; }
 .reset-btn{ font-size:12px; padding:10px 18px; white-space:nowrap; }
 .reset-icon{ font-size:14px; }
 
+.explore-toggle-btn{ font-size:12px; padding:10px 18px; white-space:nowrap; }
+.explore-toggle-icon{ font-size:14px; }
+.explore-toggle-btn[aria-pressed="true"]{ border-color:var(--accent); color:var(--accent-glow); }
+.explore-toggle-btn:disabled{ opacity:.4; pointer-events:none; }
+
+/* A quiet cue (not the button's own state, easy to miss out of the corner
+   of an eye) that Explore Mode has decoupled the scene from scroll. */
+.viewer-panel.explore-active .instructions{ border-color:var(--accent); color:var(--accent-glow); }
+
 /* ==========================================================================
    Sliding tools tray (reset / env / fullscreen), toggled by one button
    ========================================================================== */
@@ -666,10 +675,17 @@ button{ font-family:inherit; cursor:pointer; }
   .hud-top{ justify-content:flex-end; }
 
   .hud{
-    justify-content:flex-start; gap:10px;
-    padding-top:calc(var(--header-h) - 30px);
+    justify-content:flex-start; gap:14px;
+    /* Clears the fixed site header's own theme-toggle circle (bottom edge
+       sits around header-h-17px) with real breathing room — the previous
+       header-h-30px start landed the tools row close enough beneath it
+       that the two unrelated icon clusters (page header vs. panel HUD)
+       read as one cramped group. */
+    padding-top:calc(var(--header-h) - 2px);
   }
   .hud-bottom{ justify-content:flex-end; }
+  .tools-cluster{ gap:12px; }
+  .qol-controls{ gap:12px; }
 
   /* progress becomes a small, slender vertical strip pinned to the right
      edge of the screen (not just the panel) — same fill/dot markup and JS

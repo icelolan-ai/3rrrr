@@ -1603,6 +1603,10 @@ class PanelUIManager {
 
     this._bindButtons();
     this._instructionsFaded = false;
+    // Swapped in while Explore Mode is active (see setExploreActive) — the
+    // default hint's "SCROLL = เล่นแอนิเมชัน" would otherwise read as a lie
+    // once scroll no longer drives the explosion/zoom timeline.
+    this._defaultInstructionsHTML = this.instructions.innerHTML;
   }
 
   _bindButtons() {
@@ -1634,6 +1638,9 @@ class PanelUIManager {
       toolsTray.classList.toggle('open', open);
       toolsToggle.setAttribute('aria-expanded', String(open));
     });
+
+    this.exploreBtn = this.panelRoot.querySelector('.explore-toggle-btn');
+    this.exploreBtn.addEventListener('click', () => this.onToggleExplore?.());
   }
 
   updateProgressUI(progress) {
@@ -1649,6 +1656,28 @@ class PanelUIManager {
       this._instructionsFaded = false;
       this.instructions.classList.remove('faded');
     }
+  }
+
+  setExploreActive(active) {
+    this.exploreBtn.setAttribute('aria-pressed', String(active));
+    this.exploreBtn.querySelector('.explore-toggle-label').textContent = active ? 'EXIT EXPLORE' : 'EXPLORE MODE';
+    this.panelRoot.classList.toggle('explore-active', active);
+    this.instructions.innerHTML = active
+      ? `<span class="instr-item"><span class="instr-key">EXPLORE</span> โหมดสำรวจอิสระ</span>
+         <span class="instr-sep">/</span>
+         <span class="instr-item"><span class="instr-key">TAP</span> = เลือกชิ้นส่วน</span>`
+      : this._defaultInstructionsHTML;
+    // Exiting must always stay possible regardless of what phase the live
+    // scroll is currently sitting on — only ENTERING is phase-gated.
+    if (active) this.exploreBtn.disabled = false;
+  }
+
+  /** Only meaningful while NOT already exploring — greys the button out
+   *  during the ghost/rubik cross-fade, where entering Explore Mode isn't
+   *  offered (see MasterExperience.enterExploreMode). */
+  setExploreEnterable(enterable) {
+    if (this.exploreBtn.getAttribute('aria-pressed') === 'true') return;
+    this.exploreBtn.disabled = !enterable;
   }
 }
 
@@ -2076,6 +2105,16 @@ class MasterExperience {
     this._framedFor = null;
     this._grabScale = 1;
     this._transitionBase = null;
+
+    // Explore Mode (see enterExploreMode/exitExploreMode below): decouples
+    // the 3D scene from scroll while active, so the user can freely orbit/
+    // zoom/select/inspect a resting model without the explode/reassemble
+    // timeline or scroll-linked zoom fighting their input.
+    this.exploreMode = false;
+    this._exploreFrozen = null; // { phase, t } captured the instant Explore Mode was entered
+    this._exploreReturnTween = null; // smooth hand-back to live scroll on exit
+    this._liveScroll = null; // the raw, un-frozen scrollController.update() result, refreshed every tick
+    this._lastAppliedT = 0; // whichever t (live/frozen/tweened) actually drove the scene last tick
   }
 
   async init() {
@@ -2144,6 +2183,7 @@ class MasterExperience {
       lightingManager: this.lightingManager,
     });
     this.panelUI.onResetRequested = () => this.reset();
+    this.panelUI.onToggleExplore = () => this.toggleExploreMode();
 
     this.cameraPresetManager = new CameraPresetManager(this.panelRoot, {
       cameraController: this.cameraController,
@@ -2163,7 +2203,35 @@ class MasterExperience {
   }
 
   _tick(dt) {
-    const { phase, t } = this.scrollController.update(dt);
+    const live = this.scrollController.update(dt);
+    this._liveScroll = live;
+    let { phase, t } = live;
+
+    if (this.exploreMode) {
+      // Explore Mode: freeze exactly what phase/t drives (explosion state +
+      // scroll-linked zoom) at whatever they were the instant Explore Mode
+      // was entered. `live` above stays fresh every tick regardless — so
+      // exitExploreMode() knows where to smoothly resume from — it just
+      // never reaches the branch below while active. Manual orbit/zoom/
+      // selection/hover/focus/isolate are untouched, since none of them
+      // read `phase`/`t`.
+      phase = this._exploreFrozen.phase;
+      t = this._exploreFrozen.t;
+    } else if (this._exploreReturnTween) {
+      // Hand-back from Explore Mode: ease the frozen explosion/zoom state
+      // toward wherever live scroll actually is now, rather than snapping —
+      // AnimationManager.setProgress() has no damping of its own, so without
+      // this the pieces would jump straight to the live position the instant
+      // Explore Mode turned off.
+      const tw = this._exploreReturnTween;
+      tw.elapsed += dt;
+      const k = Utils.clamp(tw.elapsed / tw.duration, 0, 1);
+      phase = tw.phase;
+      t = Utils.lerp(tw.from, tw.to, Utils.easeInOutCubic(k));
+      if (k >= 1) this._exploreReturnTween = null;
+    }
+
+    this.panelUI.setExploreEnterable(live.phase !== 'transition');
 
     // Tactile "grab" feedback while actively dragging whichever model is
     // currently orbit-able; a no-op (settles to 1) during the transition,
@@ -2289,6 +2357,7 @@ class MasterExperience {
       this.cameraController.forceClearFocus();
     }
     this._phase = phase;
+    this._lastAppliedT = t;
     this.partInspector.update(t);
 
     // A plain global rather than a tighter coupling: PhysicsBackground (a
@@ -2315,6 +2384,44 @@ class MasterExperience {
   reset() {
     this.cameraController.reset();
     this.cameraPresetManager.clearActive();
+  }
+
+  /** Freezes the current object/explosion state and decouples it from
+   *  scroll — the page can still scroll normally, but the 3D timeline stops
+   *  following it until exitExploreMode(). A no-op while already exploring,
+   *  or while the live scroll is mid-transition (the button is disabled
+   *  then too — see the `setExploreEnterable` call in _tick — since
+   *  "exploring" only makes sense for one resting model, not the Ghost/
+   *  Rubik cross-fade). */
+  enterExploreMode() {
+    if (this.exploreMode || (this._liveScroll?.phase ?? this._phase) === 'transition') return;
+    this.exploreMode = true;
+    this._exploreReturnTween = null;
+    this._exploreFrozen = { phase: this._phase, t: this._lastAppliedT };
+    this.panelUI.setExploreActive(true);
+  }
+
+  /** Hands control back to scroll, easing the frozen explosion/zoom state
+   *  toward the current live scroll position rather than snapping (see the
+   *  _exploreReturnTween handling in _tick). If the user scrolled far enough
+   *  during Explore Mode that the live phase now belongs to a different
+   *  model entirely, that's too big a jump to tween frame-by-frame — resume
+   *  driving directly from the live position instead. */
+  exitExploreMode() {
+    if (!this.exploreMode) return;
+    this.exploreMode = false;
+    const live = this._liveScroll || this._exploreFrozen;
+    this._exploreReturnTween =
+      live.phase === this._exploreFrozen.phase
+        ? { phase: live.phase, from: this._exploreFrozen.t, to: live.t, elapsed: 0, duration: 0.6 }
+        : null;
+    this._exploreFrozen = null;
+    this.panelUI.setExploreActive(false);
+  }
+
+  toggleExploreMode() {
+    if (this.exploreMode) this.exitExploreMode();
+    else this.enterExploreMode();
   }
 }
 
