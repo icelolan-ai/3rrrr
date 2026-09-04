@@ -5,6 +5,7 @@
      LoadingManager        shared loading UI + progress aggregation
      SceneManager           renderer / scene / render loop / resize
      LightingManager         lights + procedural PBR environment
+     PerformanceManager       frame-time-driven HIGH/MEDIUM/LOW quality steps
      ModelManager             loads GLB(s), matches nodes, records A/B transforms
      CameraController          spherical orbit camera, zoom, framing, reset
      AnimationManager           progress -> per-cubelet transform interpolation
@@ -264,6 +265,17 @@ class SceneManager {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Called by PerformanceManager when the quality level changes — re-runs
+   *  setSize at the current canvas rect so the new cap takes effect
+   *  immediately, the same sizing math ResponsiveManager's own resize
+   *  handler already uses. */
+  setMaxPixelRatio(maxPixelRatio) {
+    if (this._maxPixelRatio === maxPixelRatio) return;
+    this._maxPixelRatio = maxPixelRatio;
+    const rect = this.canvas.getBoundingClientRect();
+    this.setSize(rect.width || window.innerWidth, rect.height || window.innerHeight);
+  }
+
   /** A full-screen quad whose only job is to scale the EXISTING framebuffer
    *  (color + alpha together) toward transparent black each frame it's
    *  drawn, rather than drawing anything of its own — CustomBlending with
@@ -393,7 +405,80 @@ class LightingManager {
     const storyMul = Utils.lerp(1, 0.75, this._storyProgress);
     this.ambient.intensity = envBase * storyMul;
   }
+
+  /** Called by PerformanceManager at the LOW quality level — this is the
+   *  renderer-wide master switch (skips the whole shadow pass when false),
+   *  so toggling it here is enough on its own; no per-light castShadow
+   *  flags need touching. */
+  setShadowsEnabled(enabled) {
+    this.sceneManager.renderer.shadowMap.enabled = enabled;
+  }
 }
+
+/* ==========================================================================
+   PerformanceManager
+   Watches per-frame render cost — frame TIME smoothed into a rolling
+   average, not a raw FPS counter, since one slow frame (a GC pause, a
+   texture upload) is noise while a sustained trend is signal — and steps
+   the scene between three quality levels (HIGH/MEDIUM/LOW): pixel ratio
+   cap, shadows, and the page-wide dust particle count. Hysteresis (several
+   seconds of a SUSTAINED trend, not a handful of frames) keeps it from
+   flapping between levels on every minor fluctuation, and stepping only
+   ever moves one level at a time (HIGH<->MEDIUM<->LOW, never straight
+   HIGH->LOW) so a brief bad patch can't overreact.
+   ========================================================================== */
+class PerformanceManager {
+  constructor(sceneManager, lightingManager) {
+    this.sceneManager = sceneManager;
+    this.lightingManager = lightingManager;
+
+    this.level = 'high';
+    this._avgFrameMs = 1000 / 60; // seed at a healthy frame time so early shader/asset warmup jank isn't mistaken for sustained slowness
+    this._badSince = 0; // seconds the rolling average has stayed uncomfortably slow
+    this._goodSince = 0; // seconds the rolling average has stayed comfortably fast
+
+    this._applyLevel('high', true);
+  }
+
+  update(dt) {
+    // Exponential moving average — smooths out one-off spikes so a real,
+    // sustained trend is what actually drives the decision below.
+    this._avgFrameMs = Utils.lerp(this._avgFrameMs, dt * 1000, 0.08);
+
+    const slow = this._avgFrameMs > PerformanceManager.SLOW_MS;
+    const fast = this._avgFrameMs < PerformanceManager.FAST_MS;
+    this._badSince = slow ? this._badSince + dt : 0;
+    this._goodSince = fast ? this._goodSince + dt : 0;
+
+    if (this.level !== 'low' && this._badSince > PerformanceManager.HYSTERESIS_S) {
+      this._applyLevel(this.level === 'high' ? 'medium' : 'low');
+    } else if (this.level !== 'high' && this._goodSince > PerformanceManager.HYSTERESIS_S) {
+      this._applyLevel(this.level === 'low' ? 'medium' : 'high');
+    }
+  }
+
+  _applyLevel(level, initial = false) {
+    if (!initial && level === this.level) return;
+    this.level = level;
+    this._badSince = 0;
+    this._goodSince = 0;
+
+    const cfg = PerformanceManager.LEVELS[level];
+    this.sceneManager.setMaxPixelRatio(cfg.maxPixelRatio);
+    this.lightingManager.setShadowsEnabled(cfg.shadows);
+    // PhysicsBackground reads this to scale its own particle count — see
+    // the __rubricQuality comment in its tick loop below.
+    window.__rubricQuality = cfg.particleFactor;
+  }
+}
+PerformanceManager.SLOW_MS = 1000 / 42; // sustained sub-~42fps reads as "struggling"
+PerformanceManager.FAST_MS = 1000 / 55; // sustained ~55fps+ reads as "comfortable" (gap between the two is a dead zone: no change either way)
+PerformanceManager.HYSTERESIS_S = 4; // seconds of sustained trend required before stepping a level
+PerformanceManager.LEVELS = {
+  high: { maxPixelRatio: 2, shadows: true, particleFactor: 1 },
+  medium: { maxPixelRatio: 1.5, shadows: true, particleFactor: 0.6 },
+  low: { maxPixelRatio: 1, shadows: false, particleFactor: 0.3 },
+};
 
 /* ==========================================================================
    ModelManager
@@ -1773,9 +1858,18 @@ class PhysicsLayer {
     this.particles = [];
     this._lastExplode = 0;
     this._journeyVisibility = 1; // see update()'s `journey` param
+    this.visibleCount = particleCount; // see setVisibleCount() — PerformanceManager's LOW/MEDIUM levels
 
     this.resize();
     this._spawnParticles();
+  }
+
+  /** PerformanceManager scales this down at reduced quality levels — capping
+   *  how many of the already-spawned particles update()/draw() touch each
+   *  frame is cheaper and avoids the visible "jump" a full respawn would
+   *  cause, versus actually reallocating the particles array. */
+  setVisibleCount(n) {
+    this.visibleCount = Utils.clamp(Math.round(n), 0, this.particleCount);
   }
 
   resize() {
@@ -1822,7 +1916,8 @@ class PhysicsLayer {
     // particles drift a bit faster as pieces separate, and again while the
     // cube is actively being dragged/rotated by hand.
     const energy = 1 + explode * 1.6 + this._rotateEnergy * 1.2;
-    for (const p of this.particles) {
+    for (let i = 0; i < this.visibleCount; i++) {
+      const p = this.particles[i];
       p.x += p.vx * energy * dt;
       p.y += p.vy * energy * dt;
       if (p.x < -10) p.x = this.width + 10;
@@ -1859,7 +1954,8 @@ class PhysicsLayer {
     // studio backdrop warm up together rather than just the backdrop.
     const accentBoost = 1 + this._lastExplode * 0.7;
     const visibility = this.dimFactor * this._journeyVisibility;
-    for (const p of this.particles) {
+    for (let i = 0; i < this.visibleCount; i++) {
+      const p = this.particles[i];
       if (p.neon) {
         const color = p.neon === 'red' ? accentColor : PhysicsLayer.VIOLET;
         this._drawNeonDot(ctx, p, color, Math.min(1, p.alpha * accentBoost) * visibility);
@@ -1922,10 +2018,17 @@ class PhysicsBackground {
       const explode = window.__rubricExplode || 0;
       const rotating = window.__rubricRotating || 0;
       const journey = window.__rubricJourney ?? 1;
+      // PerformanceManager writes this 0..1 factor when it steps the
+      // quality level (see PerformanceManager.LEVELS) — kept as a plain
+      // global rather than a tighter coupling, same as __rubricExplode
+      // etc. above, since this whole page-wide layer is deliberately
+      // independent of the Three.js scene it's reacting to.
+      const quality = window.__rubricQuality ?? 1;
       const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-glow').trim();
       const neutralColor = getComputedStyle(document.documentElement).getPropertyValue('--ink-faint').trim();
       const excludeRect = this._excludeEl ? this._excludeEl.getBoundingClientRect() : null;
       for (const layer of this.layers) {
+        layer.setVisibleCount(layer.particleCount * quality);
         layer.update(dt, explode, rotating, journey);
         layer.draw(accentColor, neutralColor, excludeRect);
       }
@@ -2138,6 +2241,7 @@ class MasterExperience {
       this.cameraController?.reframe()
     );
     this.lightingManager = new LightingManager(this.sceneManager);
+    this.performanceManager = new PerformanceManager(this.sceneManager, this.lightingManager);
 
     this.ghostModel = new ModelManager(this.sceneManager, this.loadingManager, GHOST_CONFIG);
     this.rubikModel = new ModelManager(this.sceneManager, this.loadingManager, RUBIK_CONFIG);
@@ -2219,6 +2323,8 @@ class MasterExperience {
   }
 
   _tick(dt) {
+    this.performanceManager.update(dt);
+
     const { phase, t, journey } = this.scrollController.update(dt);
 
     // Tactile "grab" feedback while actively dragging whichever model is
