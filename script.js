@@ -6,14 +6,14 @@
      SceneManager           renderer / scene / render loop / resize
      LightingManager         lights + procedural PBR environment
      ModelManager             loads GLB(s), matches nodes, records A/B transforms
-     CameraController          spherical orbit camera, zoom, framing
+     CameraController          spherical orbit camera, zoom, framing, reset
      AnimationManager           progress -> per-cubelet transform interpolation
      MasterScrollController      one continuous scroll -> phase + progress
      InteractionController        drag rotate / pinch zoom / gesture gating
      PieceHoverLabel                raycasts on hover, labels + glows the piece
      SelectionManager                click/tap select: glow + dim the rest
      PartInspector                    floating panel describing the selection
-     PanelUIManager                per-panel HUD, progress bar, quick actions
+     PanelUIManager                per-panel HUD, reset button, progress bar
      CameraPresetManager             HERO/TOP/DETAIL/EXPLODED framing popover
      ResponsiveManager             resize / orientation / DPR handling
      ThemeManager                  shared dark/light site theme toggle
@@ -627,8 +627,8 @@ class CameraController {
 
     // Once the user manually zooms (pinch, ctrl/shift+wheel, or a camera
     // preset), the scroll-linked auto zoom (see setExplodeRadius) stops
-    // touching targetRadius for the rest of the session, so it doesn't
-    // fight their input.
+    // touching targetRadius, so it doesn't fight their input; reset()
+    // re-enables it.
     this._userZoomed = false;
 
     this._defaults = null;
@@ -828,6 +828,19 @@ class CameraController {
 
   setAutoRotate(enabled) {
     this.autoRotate = enabled;
+  }
+
+  reset() {
+    if (!this._defaults) return;
+    this.forceClearFocus(); // a focused target/radius would otherwise survive a full reset
+    this._targetGoal = this._defaults.target.clone(); // eased back in update(), same as theta/phi/radius below
+    this.targetTheta = this._defaults.theta;
+    this.targetPhi = this._defaults.phi;
+    this.targetRadius = this._defaults.radius;
+    this.velTheta = 0;
+    this.velPhi = 0;
+    this.cancelFling();
+    this._userZoomed = false; // resume scroll-linked auto zoom after a reset
   }
 
   update(dt) {
@@ -1613,6 +1626,8 @@ class PanelUIManager {
   }
 
   _bindButtons() {
+    this.panelRoot.querySelector('.reset-btn').addEventListener('click', () => this.onResetRequested?.());
+
     const autoBtn = this.panelRoot.querySelector('.autorotate-btn');
     autoBtn.addEventListener('click', () => {
       const enabled = !this.cameraController.autoRotate;
@@ -1714,6 +1729,13 @@ class CameraPresetManager {
   setOpen(open) {
     this.menu.classList.toggle('open', open);
     this.toggle.setAttribute('aria-expanded', String(open));
+  }
+
+  /** Called by MasterExperience.reset() (the RESET button) so a preset
+   *  button doesn't keep showing "pressed" once RESET has moved the camera
+   *  away from it. */
+  clearActive() {
+    this.buttons.forEach((b) => b.setAttribute('aria-pressed', 'false'));
   }
 }
 
@@ -2176,6 +2198,7 @@ class MasterExperience {
       cameraController: this.cameraController,
       lightingManager: this.lightingManager,
     });
+    this.panelUI.onResetRequested = () => this.reset();
     this.panelUI.onCaptureRequested = () => this.captureScreenshot();
 
     this.cameraPresetManager = new CameraPresetManager(this.panelRoot, {
@@ -2360,6 +2383,11 @@ class MasterExperience {
     document.documentElement.style.setProperty('--journey-grid', String(Utils.clamp((journey - 0.35) / 0.35, 0, 1)));
     window.__rubricJourney = journey; // PhysicsBackground reads this to fade dust visibility in across the journey
     this.lightingManager.setStoryProgress(journey);
+  }
+
+  reset() {
+    this.cameraController.reset();
+    this.cameraPresetManager.clearActive();
   }
 
   /** VERSION 9 spec: saves the current 3D view — camera angle, explosion

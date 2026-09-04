@@ -488,7 +488,7 @@ button{ font-family:inherit; cursor:pointer; }
 .qol-controls{ display:flex; gap:8px; }
 
 /* ==========================================================================
-   Sliding tools tray (env / fullscreen), toggled by one button
+   Sliding tools tray (reset / env / fullscreen), toggled by one button
    ========================================================================== */
 .tools-cluster{ display:flex; align-items:center; gap:8px; }
 
@@ -497,8 +497,8 @@ button{ font-family:inherit; cursor:pointer; }
   max-width:0; opacity:0; overflow:hidden;
   transition:max-width .45s var(--ease), opacity .3s var(--ease), margin-right .45s var(--ease);
 }
-/* Two 42px icon buttons + 1 gap = 92px content. */
-.tools-tray.open{ max-width:120px; opacity:1; margin-right:2px; }
+/* Three 42px icon buttons + 2 gaps = 142px content. */
+.tools-tray.open{ max-width:170px; opacity:1; margin-right:2px; }
 .tools-tray > .btn{ flex-shrink:0; }
 
 .tools-toggle-icon{ display:inline-block; transition:transform .35s var(--ease); font-size:18px; line-height:1; }
