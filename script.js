@@ -14,6 +14,7 @@
      SelectionManager                click/tap select: glow + dim the rest
      PartInspector                    floating panel describing the selection
      PanelUIManager                per-panel HUD, reset button, progress bar
+     CameraPresetManager             HERO/TOP/DETAIL/EXPLODED framing popover
      ResponsiveManager             resize / orientation / DPR handling
      ThemeManager                  shared dark/light site theme toggle
      PhysicsBackground             2D-canvas particles + explosion shockwave
@@ -728,6 +729,34 @@ class CameraController {
     this._targetGoal = null;
   }
 
+  /** Jumps the camera to one of a small set of named framings (HERO / TOP /
+   *  DETAIL / EXPLODED, see CameraController.PRESETS below) — reuses the
+   *  exact same damped fields as everything else (targetTheta/targetPhi/
+   *  targetRadius/_targetGoal), so it eases in smoothly and composes
+   *  cleanly with drag-rotate happening at the same time. Always drops any
+   *  active piece focus first, since a focus's own per-tick retargetFocus()
+   *  call would otherwise immediately overwrite the preset's target on the
+   *  very next frame. No-op before the model has been framed at least once. */
+  applyPreset(name) {
+    const preset = CameraController.PRESETS[name];
+    if (!preset || !this._defaults) return;
+    this.forceClearFocus();
+    this.cancelFling();
+
+    const resolve = (mode, current, def) => (mode === 'keep' ? current : mode === 'default' ? def : mode);
+    this.targetTheta = resolve(preset.theta, this.targetTheta, this._defaults.theta);
+    this.targetPhi = Utils.clamp(resolve(preset.phi, this.targetPhi, this._defaults.phi), this.minPhi, this.maxPhi);
+
+    let radius;
+    if (preset.radius === 'assembled') radius = this._assembledDist;
+    else if (preset.radius === 'exploded') radius = this._explodedDist;
+    else radius = this._assembledDist * preset.radius; // numeric factor of the assembled framing
+    this.targetRadius = Utils.clamp(radius, this.minRadius, this.maxRadius);
+
+    this._targetGoal = this._defaults.target.clone();
+    this._userZoomed = true; // the preset's own radius shouldn't be fought by scroll-linked auto zoom
+  }
+
   /** Ties the camera's zoom to the current explode progress, so the
    *  resting cube can be framed tight (large) while the fully-exploded
    *  state still gets the extra distance it needs to avoid clipping.
@@ -846,6 +875,17 @@ class CameraController {
 // of motion (a look-at point gliding across space) than the orbit's own
 // rotation/zoom.
 CameraController.TARGET_DAMPING = 6;
+
+// Named camera framings for applyPreset(). theta/phi: 'keep' (leave as-is),
+// 'default' (the framed model's resting angle), or a literal radian value.
+// radius: 'assembled'/'exploded' (the two framed distances), or a numeric
+// factor multiplied against the assembled distance (e.g. 0.55 = closer in).
+CameraController.PRESETS = {
+  hero: { theta: 'default', phi: 'default', radius: 'assembled' },
+  top: { theta: 'keep', phi: 0.32, radius: 'assembled' },
+  detail: { theta: 'keep', phi: 'keep', radius: 0.55 },
+  exploded: { theta: 'keep', phi: 'keep', radius: 'exploded' },
+};
 
 /* ==========================================================================
    AnimationManager
@@ -1613,6 +1653,53 @@ class PanelUIManager {
 }
 
 /* ==========================================================================
+   CameraPresetManager
+   Small popover (HERO / TOP / DETAIL / EXPLODED) that jumps the camera to a
+   named framing via CameraController.applyPreset(). Kept as its own class
+   (rather than folded into PanelUIManager) since it owns a bit of state
+   PanelUIManager's other buttons don't need: open/close and click-outside.
+   ========================================================================== */
+class CameraPresetManager {
+  constructor(panelRoot, { cameraController }) {
+    this.cameraController = cameraController;
+    this.wrap = panelRoot.querySelector('.camera-preset-wrap');
+    this.toggle = panelRoot.querySelector('.camera-preset-toggle');
+    this.menu = panelRoot.querySelector('.camera-preset-menu');
+    this.buttons = Array.from(panelRoot.querySelectorAll('.camera-preset-btn'));
+
+    this.toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.setOpen(!this.menu.classList.contains('open'));
+    });
+
+    this.buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const name = btn.dataset.preset;
+        this.cameraController.applyPreset(name);
+        this.buttons.forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
+        this.setOpen(false);
+      });
+    });
+
+    document.addEventListener('pointerdown', (e) => {
+      if (!this.wrap.contains(e.target)) this.setOpen(false);
+    });
+  }
+
+  setOpen(open) {
+    this.menu.classList.toggle('open', open);
+    this.toggle.setAttribute('aria-expanded', String(open));
+  }
+
+  /** Called by MasterExperience.reset() (the RESET button) so a preset
+   *  button doesn't keep showing "pressed" once RESET has moved the camera
+   *  away from it. */
+  clearActive() {
+    this.buttons.forEach((b) => b.setAttribute('aria-pressed', 'false'));
+  }
+}
+
+/* ==========================================================================
    PhysicsBackground
    A cheap 2D-canvas background effect (kept separate from the Three.js
    scene so it never competes for the WebGL context): drifting dust/glitter
@@ -2058,6 +2145,10 @@ class MasterExperience {
     });
     this.panelUI.onResetRequested = () => this.reset();
 
+    this.cameraPresetManager = new CameraPresetManager(this.panelRoot, {
+      cameraController: this.cameraController,
+    });
+
     this.sceneManager.addRenderCallback((dt) => this._tick(dt));
     this.sceneManager.start();
   }
@@ -2223,6 +2314,7 @@ class MasterExperience {
 
   reset() {
     this.cameraController.reset();
+    this.cameraPresetManager.clearActive();
   }
 }
 
@@ -2256,4 +2348,5 @@ class App {
 window.addEventListener('DOMContentLoaded', () => {
   const app = new App();
   app.init();
+  window.__debugApp = app;
 });

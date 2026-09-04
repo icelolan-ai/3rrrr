@@ -369,7 +369,11 @@ button{ font-family:inherit; cursor:pointer; }
 .part-inspector{
   position:absolute;
   z-index:25;
-  top:calc(var(--header-h) + 20px); right:20px;
+  /* Clears the hud-top button row (RESET/env/fullscreen/camera-preset,
+     ~42px tall starting at header-h+18px) — without this gap the panel
+     sat directly on top of those buttons, hiding and blocking clicks on
+     all of them for as long as a piece stayed selected. */
+  top:calc(var(--header-h) + 70px); right:20px;
   width:236px;
   background:var(--bg-elev);
   border:1px solid var(--line);
@@ -490,6 +494,36 @@ button{ font-family:inherit; cursor:pointer; }
 
 @media (max-width:420px){
   .tools-tray.open{ max-width:220px; }
+}
+
+/* ==========================================================================
+   Camera preset popover (HERO / TOP / DETAIL / EXPLODED)
+   ========================================================================== */
+.camera-preset-wrap{ position:relative; }
+
+.camera-preset-toggle[aria-expanded="true"]{ border-color:var(--accent); color:var(--accent-glow); }
+
+.camera-preset-menu{
+  position:absolute; top:calc(100% + 8px); right:0;
+  display:flex; flex-direction:column; gap:6px;
+  width:132px; padding:8px;
+  background:var(--bg-elev); border:1px solid var(--line); border-radius:var(--radius-md);
+  backdrop-filter:blur(14px);
+  opacity:0; transform:translateY(-6px) scale(.97);
+  pointer-events:none;
+  transition:opacity .22s var(--ease), transform .22s var(--ease);
+  z-index:30;
+}
+.camera-preset-menu.open{ opacity:1; transform:translateY(0) scale(1); pointer-events:auto; }
+
+.camera-preset-btn{
+  width:100%; justify-content:center;
+  padding:8px 10px; font-size:11px; white-space:nowrap;
+}
+.camera-preset-btn[aria-pressed="true"]{ border-color:var(--accent); color:var(--accent-glow); }
+
+@media (max-width:900px){
+  .camera-preset-menu{ right:0; left:auto; }
 }
 
 /* ==========================================================================

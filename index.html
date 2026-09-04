@@ -15,7 +15,7 @@
     } catch (e) {}
   })();
 </script>
-<link rel="stylesheet" href="./style.css?v=31" />
+<link rel="stylesheet" href="./style.css?v=33" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
 </head>
 <body>
@@ -219,6 +219,16 @@
             <button class="btn btn-icon tools-toggle" type="button" title="เครื่องมือ" aria-expanded="false">
               <span class="tools-toggle-icon" aria-hidden="true">⋯</span>
             </button>
+
+            <div class="camera-preset-wrap">
+              <button class="btn btn-icon camera-preset-toggle" type="button" title="มุมกล้อง" aria-expanded="false" aria-label="เลือกมุมกล้อง">⊡</button>
+              <div class="camera-preset-menu" role="menu">
+                <button type="button" class="btn camera-preset-btn" data-preset="hero" role="menuitem">HERO</button>
+                <button type="button" class="btn camera-preset-btn" data-preset="top" role="menuitem">TOP</button>
+                <button type="button" class="btn camera-preset-btn" data-preset="detail" role="menuitem">DETAIL</button>
+                <button type="button" class="btn camera-preset-btn" data-preset="exploded" role="menuitem">EXPLODED</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -261,6 +271,6 @@
     }
   }
   </script>
-  <script type="module" src="./script.js?v=36"></script>
+  <script type="module" src="./script.js?v=37"></script>
 </body>
 </html>
