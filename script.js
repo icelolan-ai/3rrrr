@@ -1521,6 +1521,7 @@ class PartInspector {
     this.root = document.createElement('div');
     this.root.className = 'part-inspector';
     this.root.innerHTML = `
+      <button type="button" class="part-inspector-close" aria-label="ปิด">✕</button>
       <p class="part-inspector-type"></p>
       <p class="part-inspector-name"></p>
       <dl class="part-inspector-rows">
@@ -1566,6 +1567,10 @@ class PartInspector {
 
     this.root
       .querySelector('.part-inspector-reset')
+      .addEventListener('click', () => this.selectionManager.deselect());
+
+    this.root
+      .querySelector('.part-inspector-close')
       .addEventListener('click', () => this.selectionManager.deselect());
   }
 
