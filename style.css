@@ -675,10 +675,17 @@ button{ font-family:inherit; cursor:pointer; }
   .hud-top{ justify-content:flex-end; }
 
   .hud{
-    justify-content:flex-start; gap:10px;
-    padding-top:calc(var(--header-h) - 30px);
+    justify-content:flex-start; gap:14px;
+    /* Clears the fixed site header's own theme-toggle circle (bottom edge
+       sits around header-h-17px) with real breathing room — the previous
+       header-h-30px start landed the tools row close enough beneath it
+       that the two unrelated icon clusters (page header vs. panel HUD)
+       read as one cramped group. */
+    padding-top:calc(var(--header-h) - 2px);
   }
   .hud-bottom{ justify-content:flex-end; }
+  .tools-cluster{ gap:12px; }
+  .qol-controls{ gap:12px; }
 
   /* progress becomes a small, slender vertical strip pinned to the right
      edge of the screen (not just the panel) — same fill/dot markup and JS
