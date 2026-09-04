@@ -369,7 +369,11 @@ button{ font-family:inherit; cursor:pointer; }
 .part-inspector{
   position:absolute;
   z-index:25;
-  top:calc(var(--header-h) + 20px); right:20px;
+  /* Clears the hud-top button row (RESET/env/fullscreen/camera-preset,
+     ~42px tall starting at header-h+18px) — without this gap the panel
+     sat directly on top of those buttons, hiding and blocking clicks on
+     all of them for as long as a piece stayed selected. */
+  top:calc(var(--header-h) + 70px); right:20px;
   width:236px;
   background:var(--bg-elev);
   border:1px solid var(--line);
