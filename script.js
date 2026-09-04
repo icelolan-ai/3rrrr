@@ -329,6 +329,7 @@ class LightingManager {
   constructor(sceneManager) {
     this.sceneManager = sceneManager;
     this.envEnabled = true;
+    this._storyProgress = 0;
     this._buildEnvironment();
     this._buildLights();
   }
@@ -370,10 +371,28 @@ class LightingManager {
   toggleEnvironment() {
     this.envEnabled = !this.envEnabled;
     this.sceneManager.scene.environment = this.envEnabled ? this.envTexture : null;
-    this.ambient.intensity = this.envEnabled ? 0.35 : 0.9;
+    this._recomputeAmbient();
     return this.envEnabled;
   }
 
+  /** Background storytelling (see MasterExperience._tick): the lighting's
+   *  own contribution to "gets more dramatic/high-contrast toward the end
+   *  of the page" — ambient (flat fill light) eases down while the rim
+   *  light (silhouette/edge highlight) eases up, over the same 0..1 whole-
+   *  page journey driving the CSS backdrop. Composes with the env-texture
+   *  toggle rather than fighting it — both write through _recomputeAmbient
+   *  so whichever changed most recently doesn't clobber the other. */
+  setStoryProgress(progress) {
+    this._storyProgress = Utils.clamp(progress, 0, 1);
+    this._recomputeAmbient();
+    this.rimLight.intensity = Utils.lerp(1.3, 2.0, this._storyProgress);
+  }
+
+  _recomputeAmbient() {
+    const envBase = this.envEnabled ? 0.35 : 0.9;
+    const storyMul = Utils.lerp(1, 0.75, this._storyProgress);
+    this.ambient.intensity = envBase * storyMul;
+  }
 }
 
 /* ==========================================================================
@@ -1660,7 +1679,10 @@ class PanelUIManager {
 
   setExploreActive(active) {
     this.exploreBtn.setAttribute('aria-pressed', String(active));
-    this.exploreBtn.querySelector('.explore-toggle-label').textContent = active ? 'EXIT EXPLORE' : 'EXPLORE MODE';
+    // Icon-only button (lives in .tools-tray) — state reads from the
+    // accent-ring aria-pressed styling, same as env-btn/autorotate-btn;
+    // the tooltip still spells it out for anyone hovering/long-pressing.
+    this.exploreBtn.title = active ? 'ออกจากโหมดสำรวจอิสระ' : 'เข้าสู่โหมดสำรวจอิสระ ไม่ผูกกับการเลื่อนหน้าจอ';
     this.panelRoot.classList.toggle('explore-active', active);
     this.instructions.innerHTML = active
       ? `<span class="instr-item"><span class="instr-key">EXPLORE</span> โหมดสำรวจอิสระ</span>
@@ -1761,6 +1783,7 @@ class PhysicsLayer {
     this.dimFactor = dimFactor;
     this.particles = [];
     this._lastExplode = 0;
+    this._journeyVisibility = 1; // see update()'s `journey` param
 
     this.resize();
     this._spawnParticles();
@@ -1796,8 +1819,13 @@ class PhysicsLayer {
     }
   }
 
-  update(dt, explode, rotating = 0) {
+  update(dt, explode, rotating = 0, journey = 1) {
     this._lastExplode = explode;
+    // Background storytelling: dust starts sparse ("Stage 1: minimal") and
+    // fades up to full visibility as the reader scrolls through the whole
+    // page ("Stage 4: particles become a feature") — never fully zero, so
+    // the very top of the page isn't jarringly bare.
+    this._journeyVisibility = Utils.lerp(0.35, 1, journey);
     // Damped rather than snapping straight to 0/1, so the extra drift eases
     // in on grab and back out on release instead of jumping.
     this._rotateEnergy = Utils.damp(this._rotateEnergy || 0, rotating, 6, dt);
@@ -1841,13 +1869,14 @@ class PhysicsLayer {
     // --explode-intensity in style.css), so the particle field and the
     // studio backdrop warm up together rather than just the backdrop.
     const accentBoost = 1 + this._lastExplode * 0.7;
+    const visibility = this.dimFactor * this._journeyVisibility;
     for (const p of this.particles) {
       if (p.neon) {
         const color = p.neon === 'red' ? accentColor : PhysicsLayer.VIOLET;
-        this._drawNeonDot(ctx, p, color, Math.min(1, p.alpha * accentBoost) * this.dimFactor);
+        this._drawNeonDot(ctx, p, color, Math.min(1, p.alpha * accentBoost) * visibility);
       } else {
         ctx.beginPath();
-        ctx.fillStyle = Utils.hexToRgba(neutralColor, p.alpha * this.dimFactor);
+        ctx.fillStyle = Utils.hexToRgba(neutralColor, p.alpha * visibility);
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
         ctx.fill();
       }
@@ -1903,11 +1932,12 @@ class PhysicsBackground {
       lastTime = now;
       const explode = window.__rubricExplode || 0;
       const rotating = window.__rubricRotating || 0;
+      const journey = window.__rubricJourney ?? 1;
       const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-glow').trim();
       const neutralColor = getComputedStyle(document.documentElement).getPropertyValue('--ink-faint').trim();
       const excludeRect = this._excludeEl ? this._excludeEl.getBoundingClientRect() : null;
       for (const layer of this.layers) {
-        layer.update(dt, explode, rotating);
+        layer.update(dt, explode, rotating, journey);
         layer.draw(accentColor, neutralColor, excludeRect);
       }
       requestAnimationFrame(tick);
@@ -2080,7 +2110,13 @@ class MasterScrollController {
       phase = 'rubik';
       t = d3 > d2 ? (s - d2) / (d3 - d2) : 1;
     }
-    this.current = { phase, t: Utils.clamp(t, 0, 1), global: s };
+    // Overall page journey, 0..1 — unlike phase/t (bounded within one of the
+    // three ghost/transition/rubik ranges), this spans the ENTIRE scrollable
+    // section, for effects that should evolve once across the whole story
+    // rather than resetting at each phase boundary (see the background
+    // storytelling CSS vars in MasterExperience._tick).
+    const journey = d3 > 0 ? Utils.clamp(s / d3, 0, 1) : 0;
+    this.current = { phase, t: Utils.clamp(t, 0, 1), global: s, journey };
     return this.current;
   }
 }
@@ -2379,6 +2415,26 @@ class MasterExperience {
     // as a cube comes apart, instead of sitting at one fixed intensity
     // through the whole scroll journey.
     document.documentElement.style.setProperty('--explode-intensity', String(window.__rubricExplode));
+
+    // Background storytelling (see style.css --studio-glow-*/--studio-
+    // vignette/--dot-color, plus LightingManager.setStoryProgress below):
+    // driven by the OVERALL page journey (live.journey, 0..1 across the
+    // whole section) rather than the per-phase/frozen `t` above — the
+    // reader keeps scrolling normally even in Explore Mode, and the
+    // backdrop should keep tracking that regardless of whether the 3D
+    // scene itself is currently frozen.
+    const journey = live.journey;
+    document.documentElement.style.setProperty('--journey-progress', String(journey));
+    // Shaping curves kept in JS (not replicated as nested calc()/clamp() in
+    // two separate theme blocks in CSS): --journey-rich only turns on for
+    // the back half of the journey (the violet/blue accents + extra
+    // contrast that read as "getting more cinematic"), --journey-grid
+    // ramps across the middle third (the grid "begins appearing" as its
+    // own mid-story beat rather than being there from the very top).
+    document.documentElement.style.setProperty('--journey-rich', String(Utils.clamp((journey - 0.5) * 2, 0, 1)));
+    document.documentElement.style.setProperty('--journey-grid', String(Utils.clamp((journey - 0.35) / 0.35, 0, 1)));
+    window.__rubricJourney = journey; // PhysicsBackground reads this to fade dust visibility in across the journey
+    this.lightingManager.setStoryProgress(journey);
   }
 
   reset() {

@@ -37,16 +37,24 @@
 
   /* Studio-light page backdrop (see body/.viewer-panel, below): a few soft
      colored glows — like gelled studio spotlights against a black
-     cyclorama — plus a vignette that gently darkens toward the page edges. */
-  --studio-glow-1: rgba(168,85,247,.16); /* violet */
-  /* the red glow's own alpha rises with --explode-intensity (see
-     MasterExperience._tick in script.js, which writes it every frame as
-     window.__rubricExplode's 0..1 value) — the backdrop visibly warms as
-     a cube comes apart, tying the accent color to scroll progress rather
-     than sitting static throughout the whole journey */
-  --studio-glow-2: rgba(255,45,59, calc(.14 + var(--explode-intensity, 0) * .22));
-  --studio-glow-3: rgba(56,130,255,.13); /* blue */
-  --studio-vignette: rgba(0,0,0,.55);
+     cyclorama — plus a vignette that gently darkens toward the page edges.
+     Background storytelling (see --journey-progress/--journey-rich/
+     --journey-grid below): the whole backdrop evolves across the ONE
+     continuous page scroll, not just within a single cube's own explode —
+     it opens clean and dark, the red glow and vignette build in as you
+     scroll, and the violet/blue accents plus the dot-grid only join in
+     later, so the page reads as one deliberate progression rather than a
+     static backdrop the 3D content happens to sit on. */
+  --studio-glow-1: rgba(168,85,247, calc(.16 * var(--journey-rich, 0))); /* violet — late-journey only */
+  /* the red glow has two additive components: a baseline that ramps in
+     with overall page progress (--journey-progress, written every frame
+     by MasterExperience._tick from MasterScrollController's whole-page
+     0..1 fraction), plus a bonus tied to --explode-intensity (the ACTIVE
+     cube's own 0..1 explode progress) — so it both tells the page-level
+     story and still visibly warms further as a cube comes apart. */
+  --studio-glow-2: rgba(255,45,59, calc(var(--journey-progress, 0) * .14 + var(--explode-intensity, 0) * .22));
+  --studio-glow-3: rgba(56,130,255, calc(.13 * var(--journey-rich, 0))); /* blue — late-journey only */
+  --studio-vignette: rgba(0,0,0, calc(.35 + var(--journey-progress, 0) * .28)); /* contrast deepens toward the end */
   /* the actual layered gradient, shared verbatim by body AND .viewer-panel
      (both background-attachment:fixed) so they render pixel-identical and
      line up seamlessly instead of being two separate backgrounds */
@@ -58,10 +66,13 @@
     var(--bg);
 
   /* Static dot-grid texture (see body::before / .viewer-panel::before,
-     below) — light theme only (see the override there): on dark theme the
-     physics particles alone carry the background, so this stays off here
-     rather than layering a second texture on top of them. */
-  --dot-bg: none;
+     below) — "a technical grid begins appearing" as its own story beat:
+     it stays fully off at the top of the page (both themes) and fades in
+     once --journey-grid (also written every frame, a 0..1 ramp over the
+     journey's middle third) rises off zero. Each theme only needs to set
+     its own --dot-color; the gradient shape/size is shared here. */
+  --dot-color: rgba(220,222,235, calc(.09 * var(--journey-grid, 0)));
+  --dot-bg: radial-gradient(var(--dot-color) 1.1px, transparent 1.4px) 0 0/28px 28px;
 }
 
 /* ==========================================================================
@@ -85,16 +96,19 @@
   --hud-border: rgba(255,255,255,.28);
 
   /* light theme keeps the studio backdrop white/red-toned rather than
-     neon violet/blue, and a much softer vignette to suit a white page */
-  --studio-glow-1: rgba(224,18,31,.07);
-  --studio-glow-2: rgba(224,18,31, calc(.10 + var(--explode-intensity, 0) * .18));
-  --studio-glow-3: rgba(224,18,31,.05);
-  --studio-vignette: rgba(30,10,12,.08);
+     neon violet/blue, and a much softer vignette to suit a white page —
+     same journey-driven story beats as the dark theme above, just scaled
+     down to this theme's own subtler palette. */
+  --studio-glow-1: rgba(224,18,31, calc(.07 * var(--journey-rich, 0)));
+  --studio-glow-2: rgba(224,18,31, calc(var(--journey-progress, 0) * .10 + var(--explode-intensity, 0) * .18));
+  --studio-glow-3: rgba(224,18,31, calc(.05 * var(--journey-rich, 0)));
+  --studio-vignette: rgba(30,10,12, calc(.05 + var(--journey-progress, 0) * .06));
 
-  /* dot-grid is enabled for light theme only — dark theme leaves it off
-     (--dot-bg:none above) and relies on the physics particles alone */
-  --dot-color: rgba(20,10,12,.22);
-  --dot-bg: radial-gradient(var(--dot-color) 1.1px, transparent 1.4px) 0 0/28px 28px;
+  /* the grid was already always-on for light theme pre-storytelling; now
+     it follows the same --journey-grid reveal as dark theme instead of
+     sitting there constantly (--dot-bg's shared gradient shape lives in
+     :root above, this only overrides the color/reveal) */
+  --dot-color: rgba(20,10,12, calc(.22 * var(--journey-grid, 0)));
 }
 
 *,*::before,*::after{ box-sizing:border-box; }
@@ -476,9 +490,8 @@ button{ font-family:inherit; cursor:pointer; }
 .reset-btn{ font-size:12px; padding:10px 18px; white-space:nowrap; }
 .reset-icon{ font-size:14px; }
 
-.explore-toggle-btn{ font-size:12px; padding:10px 18px; white-space:nowrap; }
-.explore-toggle-icon{ font-size:14px; }
-.explore-toggle-btn[aria-pressed="true"]{ border-color:var(--accent); color:var(--accent-glow); }
+/* Lives inside .tools-tray now (see below) — a plain .btn-icon toggle,
+   the same accent-ring/pressed styling as env-btn etc. comes for free. */
 .explore-toggle-btn:disabled{ opacity:.4; pointer-events:none; }
 
 /* A quiet cue (not the button's own state, easy to miss out of the corner
@@ -495,14 +508,17 @@ button{ font-family:inherit; cursor:pointer; }
   max-width:0; opacity:0; overflow:hidden;
   transition:max-width .45s var(--ease), opacity .3s var(--ease), margin-right .45s var(--ease);
 }
-.tools-tray.open{ max-width:280px; opacity:1; margin-right:2px; }
+/* RESET (text pill, ~99px) + explore/env/fullscreen (three 42px icons) +
+   4 gaps — 280px covered the original 3-button tray with room to spare;
+   widened for the 4th (explore-toggle-btn) button added here. */
+.tools-tray.open{ max-width:320px; opacity:1; margin-right:2px; }
 .tools-tray > .btn{ flex-shrink:0; }
 
 .tools-toggle-icon{ display:inline-block; transition:transform .35s var(--ease); font-size:18px; line-height:1; }
 .tools-toggle[aria-expanded="true"] .tools-toggle-icon{ transform:rotate(90deg); }
 
 @media (max-width:420px){
-  .tools-tray.open{ max-width:220px; }
+  .tools-tray.open{ max-width:270px; }
 }
 
 /* ==========================================================================
@@ -685,7 +701,6 @@ button{ font-family:inherit; cursor:pointer; }
   }
   .hud-bottom{ justify-content:flex-end; }
   .tools-cluster{ gap:12px; }
-  .qol-controls{ gap:12px; }
 
   /* progress becomes a small, slender vertical strip pinned to the right
      edge of the screen (not just the panel) — same fill/dot markup and JS
