@@ -611,6 +611,20 @@ class CameraController {
     this._userZoomed = false;
 
     this._defaults = null;
+
+    // Focus-on-piece state (see focusOnPart/retargetFocus/unfocus below).
+    // While `_targetGoal` is set, update() eases `target` toward it every
+    // frame alongside the already-damped theta/phi/radius — reusing those
+    // exact same fields (rather than a parallel camera state) is what lets
+    // drag-rotate keep working untouched throughout a focus, before it,
+    // and after: dragging only ever adjusts targetTheta/targetPhi, so it
+    // simply ends up orbiting around wherever `target` currently is.
+    this._targetGoal = null;
+    this._preFocusState = null; // { target, radius, userZoomed } to restore on unfocus
+  }
+
+  get isFocused() {
+    return !!this._preFocusState;
   }
 
   /** Vertical FOV alone under-shoots the needed distance whenever the
@@ -659,6 +673,59 @@ class CameraController {
     if (this._framedAssembledSphere && this._framedExplodedSphere) {
       this.frameToRange(this._framedAssembledSphere, this._framedExplodedSphere);
     }
+  }
+
+  /** Smoothly retargets the orbit onto a single piece — keeps the current
+   *  viewing angle (theta/phi) exactly as the user left it, only eases
+   *  `target` to the piece's own world-space center and pulls `targetRadius`
+   *  in to frame just that piece, reusing the same _fitDistance math as the
+   *  whole-model framing. The piece's own bounding sphere (not the whole
+   *  model's minRadius, sized for framing all 27 pieces at once) sets how
+   *  close this is allowed to get. Safe to call again on an already-focused
+   *  camera — re-fits onto a new piece without re-capturing _preFocusState,
+   *  so chaining focus from piece to piece never loses the ORIGINAL
+   *  pre-focus view that "back to model" should return to. */
+  focusOnPart(object3D) {
+    if (!this._preFocusState) {
+      this._preFocusState = { target: this.target.clone(), radius: this.targetRadius, userZoomed: this._userZoomed };
+    }
+    const sphere = new THREE.Box3().setFromObject(object3D).getBoundingSphere(new THREE.Sphere());
+    this._targetGoal = sphere.center.clone();
+    this._userZoomed = true; // scroll shouldn't fight the focus zoom
+    this.targetRadius = Utils.clamp(this._fitDistance(sphere.radius, 1.4), 0.3, this.maxRadius);
+  }
+
+  /** Keeps the focus target locked onto a piece that may still be
+   *  animating (explode/reassemble via scroll) while focused — call every
+   *  tick, unlike focusOnPart's one-time bounding-sphere refit which is
+   *  only needed once per piece. A no-op if nothing is currently focused. */
+  retargetFocus(object3D) {
+    if (!this._preFocusState) return;
+    if (!this._targetGoal) this._targetGoal = new THREE.Vector3();
+    object3D.getWorldPosition(this._targetGoal);
+  }
+
+  /** Smoothly returns to whatever the camera was framing right before the
+   *  first focusOnPart call — "BACK TO MODEL". */
+  unfocus() {
+    if (!this._preFocusState) return;
+    const { target, radius, userZoomed } = this._preFocusState;
+    this._targetGoal = target.clone();
+    this.targetRadius = radius;
+    this._userZoomed = userZoomed;
+    this._preFocusState = null;
+  }
+
+  /** Instantly (no damping) drops focus without animating back — used when
+   *  the active model is about to change out from under it (entering the
+   *  ghost/rubik transition, or a full experience reset), so a stale
+   *  _userZoomed:true doesn't silently disable scroll-linked zoom in
+   *  whatever comes next. */
+  forceClearFocus() {
+    if (!this._preFocusState) return;
+    this._userZoomed = this._preFocusState.userZoomed;
+    this._preFocusState = null;
+    this._targetGoal = null;
   }
 
   /** Ties the camera's zoom to the current explode progress, so the
@@ -716,6 +783,8 @@ class CameraController {
 
   reset() {
     if (!this._defaults) return;
+    this.forceClearFocus(); // a focused target/radius would otherwise survive a full reset
+    this._targetGoal = this._defaults.target.clone(); // eased back in update(), same as theta/phi/radius below
     this.targetTheta = this._defaults.theta;
     this.targetPhi = this._defaults.phi;
     this.targetRadius = this._defaults.radius;
@@ -726,6 +795,16 @@ class CameraController {
   }
 
   update(dt) {
+    if (this._targetGoal) {
+      this.target.x = Utils.damp(this.target.x, this._targetGoal.x, CameraController.TARGET_DAMPING, dt);
+      this.target.y = Utils.damp(this.target.y, this._targetGoal.y, CameraController.TARGET_DAMPING, dt);
+      this.target.z = Utils.damp(this.target.z, this._targetGoal.z, CameraController.TARGET_DAMPING, dt);
+      if (this.target.distanceTo(this._targetGoal) < 0.01) {
+        this.target.copy(this._targetGoal);
+        this._targetGoal = null;
+      }
+    }
+
     if (this.autoRotate) this.targetTheta += this.autoRotateSpeed * dt;
 
     // Momentum: fling keeps nudging the target forward, decaying to zero.
@@ -762,6 +841,11 @@ class CameraController {
     this.camera.lookAt(this.target);
   }
 }
+// Damping rate for easing `target` toward `_targetGoal` (focus in/out, and
+// reset) — independent of zoomDamping/springK since it's a different kind
+// of motion (a look-at point gliding across space) than the orbit's own
+// rotation/zoom.
+CameraController.TARGET_DAMPING = 6;
 
 /* ==========================================================================
    AnimationManager
@@ -1264,9 +1348,11 @@ SelectionManager.GLOW_INTENSITY = 0.55;
    being trapped inside the panel's own box.
    ========================================================================== */
 class PartInspector {
-  constructor(panelRoot, { selectionManager }) {
+  constructor(panelRoot, { selectionManager, cameraController }) {
     this.selectionManager = selectionManager;
+    this.cameraController = cameraController;
     this._isOpen = false;
+    this._focusedName = null; // which piece the camera is currently focused on, if any
 
     this.root = document.createElement('div');
     this.root.className = 'part-inspector';
@@ -1278,7 +1364,10 @@ class PartInspector {
         <div class="part-inspector-row"><dt>Explosion</dt><dd class="part-inspector-progress"></dd></div>
         <div class="part-inspector-row"><dt>Material</dt><dd class="part-inspector-material"></dd></div>
       </dl>
-      <button type="button" class="btn part-inspector-reset">RESET</button>
+      <div class="part-inspector-actions">
+        <button type="button" class="btn part-inspector-focus">FOCUS</button>
+        <button type="button" class="btn part-inspector-reset">RESET</button>
+      </div>
     `;
     panelRoot.appendChild(this.root);
 
@@ -1287,10 +1376,32 @@ class PartInspector {
     this._posEl = this.root.querySelector('.part-inspector-position');
     this._progEl = this.root.querySelector('.part-inspector-progress');
     this._matEl = this.root.querySelector('.part-inspector-material');
+    this._focusBtn = this.root.querySelector('.part-inspector-focus');
+
+    this._focusBtn.addEventListener('click', () => {
+      const { selectedModel, selectedName } = this.selectionManager;
+      if (this.cameraController.isFocused) {
+        this.cameraController.unfocus();
+        this._focusedName = null;
+      } else if (selectedModel && selectedName) {
+        const part = selectedModel.parts.get(selectedName);
+        if (part) {
+          this.cameraController.focusOnPart(part.object3D);
+          this._focusedName = selectedName;
+        }
+      }
+      this._updateFocusLabel();
+    });
 
     this.root
       .querySelector('.part-inspector-reset')
       .addEventListener('click', () => this.selectionManager.deselect());
+  }
+
+  _updateFocusLabel() {
+    const focused = this.cameraController.isFocused;
+    this._focusBtn.textContent = focused ? 'BACK TO MODEL' : 'FOCUS';
+    this._focusBtn.setAttribute('aria-pressed', String(focused));
   }
 
   /** `explodeProgress` is the active model's own current 0..1 scroll
@@ -1305,10 +1416,33 @@ class PartInspector {
       this._isOpen = isOpen;
       this.root.classList.toggle('is-open', isOpen);
     }
-    if (!isOpen) return;
+    if (!isOpen) {
+      // Deselecting (RESET, clicking elsewhere, or a phase-boundary force
+      // restore) always drops any active focus too — nothing left to focus on.
+      if (this.cameraController.isFocused) this.cameraController.unfocus();
+      this._focusedName = null;
+      this._updateFocusLabel();
+      return;
+    }
 
     const part = selectedModel.parts.get(selectedName);
     if (!part) return;
+
+    if (this.cameraController.isFocused) {
+      if (selectedName !== this._focusedName) {
+        // Selection changed to a different piece while already focused —
+        // re-fit onto the new one rather than exiting focus (focusOnPart
+        // only captures _preFocusState once, so the ORIGINAL pre-focus
+        // view is still what "back to model" restores).
+        this.cameraController.focusOnPart(part.object3D);
+        this._focusedName = selectedName;
+      } else {
+        // Same piece — just keep tracking it in case it's still animating
+        // (explode/reassemble via scroll) rather than a one-time snapshot.
+        this.cameraController.retargetFocus(part.object3D);
+      }
+    }
+    this._updateFocusLabel();
 
     this._typeEl.textContent = Utils.classifyPiece(selectedModel, selectedName) || '—';
     this._nameEl.textContent = selectedName;
@@ -1866,7 +2000,10 @@ class MasterExperience {
     };
 
     this.selectionManager = new SelectionManager(this.sceneManager, { getActiveModel });
-    this.partInspector = new PartInspector(this.panelRoot, { selectionManager: this.selectionManager });
+    this.partInspector = new PartInspector(this.panelRoot, {
+      selectionManager: this.selectionManager,
+      cameraController: this.cameraController,
+    });
 
     this.pieceHoverLabel = new PieceHoverLabel(this.sceneManager, this.panelRoot, {
       interactionController: this.interactionController,
@@ -2022,6 +2159,7 @@ class MasterExperience {
     if (phase === 'transition' && this._phase !== 'transition') {
       this.selectionManager.forceRestoreImmediate();
       this.pieceHoverLabel.forceRestoreImmediate?.();
+      this.cameraController.forceClearFocus();
     }
     this._phase = phase;
     this.partInspector.update(t);

@@ -394,7 +394,9 @@ button{ font-family:inherit; cursor:pointer; }
 .part-inspector-row{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:0; }
 .part-inspector-row dt{ font-size:11px; color:var(--ink-faint); letter-spacing:.03em; }
 .part-inspector-row dd{ margin:0; font-size:12px; color:var(--ink-dim); font-variant-numeric:tabular-nums; text-align:right; }
-.part-inspector-reset{ width:100%; justify-content:center; padding:10px 18px; font-size:12px; }
+.part-inspector-actions{ display:flex; gap:8px; }
+.part-inspector-focus,.part-inspector-reset{ flex:1; justify-content:center; padding:10px 14px; font-size:12px; white-space:nowrap; }
+.part-inspector-focus[aria-pressed="true"]{ border-color:var(--accent); color:var(--accent-glow); }
 
 /* ==========================================================================
    Phase marker + the 3D-transition scroll runway — an invisible spacer the
