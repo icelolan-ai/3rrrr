@@ -360,6 +360,42 @@ button{ font-family:inherit; cursor:pointer; }
 }
 .piece-hover-label.is-visible{ opacity:1; transform:translateY(0); }
 
+/* Floating card describing whatever piece SelectionManager currently has
+   selected (see PartInspector in script.js) — docked to the sticky
+   .viewer-panel's own top-right corner as its containing block. Solid
+   card chrome (--bg-elev/--line), not the HUD pill language, since it
+   carries real content rather than a transient label. Switches to a
+   position:fixed bottom sheet on mobile — see the max-width:900px block. */
+.part-inspector{
+  position:absolute;
+  z-index:25;
+  top:calc(var(--header-h) + 20px); right:20px;
+  width:236px;
+  background:var(--bg-elev);
+  border:1px solid var(--line);
+  border-radius:var(--radius-md);
+  backdrop-filter:blur(14px);
+  padding:18px;
+  opacity:0;
+  transform:translateX(16px);
+  pointer-events:none;
+  transition:opacity .3s var(--ease), transform .3s var(--ease);
+}
+.part-inspector.is-open{ opacity:1; transform:translateX(0); pointer-events:auto; }
+.part-inspector-type{
+  margin:0; font-size:11px; font-weight:700; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--accent-glow);
+}
+.part-inspector-name{
+  margin:4px 0 14px; font-size:14px; font-weight:600; color:var(--ink);
+  word-break:break-all; line-height:1.35;
+}
+.part-inspector-rows{ margin:0 0 16px; display:flex; flex-direction:column; gap:8px; }
+.part-inspector-row{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:0; }
+.part-inspector-row dt{ font-size:11px; color:var(--ink-faint); letter-spacing:.03em; }
+.part-inspector-row dd{ margin:0; font-size:12px; color:var(--ink-dim); font-variant-numeric:tabular-nums; text-align:right; }
+.part-inspector-reset{ width:100%; justify-content:center; padding:10px 18px; font-size:12px; }
+
 /* ==========================================================================
    Phase marker + the 3D-transition scroll runway — an invisible spacer the
    JS reads (getBoundingClientRect) to split the single continuous scroll
@@ -609,6 +645,19 @@ button{ font-family:inherit; cursor:pointer; }
   .progress-wrap.is-hidden{ transform:translateY(-50%) translateX(8px); }
   .progress-label-left, .progress-label-right, .progress-percent{ display:none; }
   .progress-track{ width:128px; height:2px; flex:none; transform:rotate(90deg); }
+
+  /* Part Inspector becomes a bottom sheet spanning the real viewport width
+     — position:fixed here escapes .viewer-panel's own box entirely (no
+     transform/filter on it or any ancestor to trap it), rather than
+     staying docked to the panel's top-right corner like on desktop. */
+  .part-inspector{
+    position:fixed; top:auto; right:0; bottom:0; left:0;
+    width:auto; z-index:60;
+    border-radius:var(--radius-md) var(--radius-md) 0 0;
+    padding:18px 20px calc(18px + env(safe-area-inset-bottom));
+    transform:translateY(100%);
+  }
+  .part-inspector.is-open{ transform:translateY(0); }
 }
 
 /* ==========================================================================

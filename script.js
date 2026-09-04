@@ -12,6 +12,7 @@
      InteractionController        drag rotate / pinch zoom / gesture gating
      PieceHoverLabel                raycasts on hover, labels + glows the piece
      SelectionManager                click/tap select: glow + dim the rest
+     PartInspector                    floating panel describing the selection
      PanelUIManager                per-panel HUD, reset button, progress bar
      ResponsiveManager             resize / orientation / DPR handling
      ThemeManager                  shared dark/light site theme toggle
@@ -117,6 +118,41 @@ const Utils = {
     clone.opacity = original.opacity;
     mesh.material = clone;
     return original;
+  },
+  /** Coordinate range (min/max across every piece's xyz) differs between
+   *  the two models — Ghost uses -1/0/1, Rubik uses 0/1/2 — but "the
+   *  middle value" is always their arithmetic mean, so this stays generic
+   *  instead of hardcoding either model's numbering. Cached on the model
+   *  itself since it never changes after load. */
+  coordRangeFor: (model) => {
+    if (model._pieceCoordRange) return model._pieceCoordRange;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const key of model.parts.keys()) {
+      const match = /_(-?\d+)_(-?\d+)_(-?\d+)$/.exec(key);
+      if (!match) continue;
+      for (let i = 1; i <= 3; i++) {
+        const v = Number(match[i]);
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+    }
+    model._pieceCoordRange = { min, max };
+    return model._pieceCoordRange;
+  },
+  /** Classifies a piece as Corner/Edge/Center/Core purely from its GLB node
+   *  name's "_x_y_z" coordinate suffix — shared by every piece-level UI
+   *  that wants to describe what kind of piece is selected/hovered. */
+  classifyPiece: (model, name) => {
+    const match = /_(-?\d+)_(-?\d+)_(-?\d+)$/.exec(name);
+    if (!match) return null;
+    const { min, max } = Utils.coordRangeFor(model);
+    const mid = (min + max) / 2;
+    const extremeCount = [1, 2, 3].filter((i) => Number(match[i]) !== mid).length;
+    if (extremeCount === 3) return 'มุม · Corner';
+    if (extremeCount === 2) return 'ขอบ · Edge';
+    if (extremeCount === 1) return 'กลางหน้า · Center';
+    return 'แกนกลาง · Core';
   },
 };
 
@@ -979,40 +1015,6 @@ class PieceHoverLabel {
     this.label.classList.remove('is-visible');
   }
 
-  /** Coordinate range (min/max across every piece's xyz) differs between
-   *  the two models — Ghost uses -1/0/1, Rubik uses 0/1/2 — but "the
-   *  middle value" is always their arithmetic mean, so this stays generic
-   *  instead of hardcoding either model's numbering. Cached on the model
-   *  itself since it never changes after load. */
-  _coordRangeFor(model) {
-    if (model._pieceCoordRange) return model._pieceCoordRange;
-    let min = Infinity;
-    let max = -Infinity;
-    for (const key of model.parts.keys()) {
-      const match = /_(-?\d+)_(-?\d+)_(-?\d+)$/.exec(key);
-      if (!match) continue;
-      for (let i = 1; i <= 3; i++) {
-        const v = Number(match[i]);
-        if (v < min) min = v;
-        if (v > max) max = v;
-      }
-    }
-    model._pieceCoordRange = { min, max };
-    return model._pieceCoordRange;
-  }
-
-  _classify(model, name) {
-    const match = /_(-?\d+)_(-?\d+)_(-?\d+)$/.exec(name);
-    if (!match) return null;
-    const { min, max } = this._coordRangeFor(model);
-    const mid = (min + max) / 2;
-    const extremeCount = [1, 2, 3].filter((i) => Number(match[i]) !== mid).length;
-    if (extremeCount === 3) return 'มุม · Corner';
-    if (extremeCount === 2) return 'ขอบ · Edge';
-    if (extremeCount === 1) return 'กลางหน้า · Center';
-    return 'แกนกลาง · Core';
-  }
-
   /** Resolves the piece actually under the cursor right now — null whenever
    *  hover shouldn't count at all (no pointer, actively dragging, no active
    *  model such as mid-transition, or something is currently selected).
@@ -1055,7 +1057,7 @@ class PieceHoverLabel {
     if (Math.abs(this._hoverIntensity - targetIntensity) < 0.01) this._hoverIntensity = targetIntensity;
     if (this._highlightMeshes.length) this._applyHoverIntensity(this._hoverIntensity);
 
-    const label = pieceName ? this._classify(model, pieceName) : null;
+    const label = pieceName ? Utils.classifyPiece(model, pieceName) : null;
     if (!label) {
       this._hide();
       return;
@@ -1245,6 +1247,88 @@ SelectionManager.DIM_OPACITY = 0.42;
 // unmistakably reads as "locked in" rather than just currently under the
 // pointer.
 SelectionManager.GLOW_INTENSITY = 0.55;
+
+/* ==========================================================================
+   PartInspector
+   A small floating panel that appears whenever SelectionManager has an
+   active selection, describing the selected piece — its classified type
+   (Corner/Edge/Center/Core), name, live position, current explode progress,
+   and material name — read straight off the GLB node/material rather than
+   hardcoded per-model. Desktop: a card docked to the panel's top-right,
+   pinned via `position:absolute` against the sticky .viewer-panel as its
+   containing block. Mobile: switches to a `position:fixed` bottom sheet
+   spanning the true viewport width, via the same rule at the same
+   `max-width:900px` breakpoint the rest of the mobile layout uses (see
+   style.css) — .viewer-panel and its ancestors have no `transform`, so
+   `position:fixed` here correctly escapes to the real viewport rather than
+   being trapped inside the panel's own box.
+   ========================================================================== */
+class PartInspector {
+  constructor(panelRoot, { selectionManager }) {
+    this.selectionManager = selectionManager;
+    this._isOpen = false;
+
+    this.root = document.createElement('div');
+    this.root.className = 'part-inspector';
+    this.root.innerHTML = `
+      <p class="part-inspector-type"></p>
+      <p class="part-inspector-name"></p>
+      <dl class="part-inspector-rows">
+        <div class="part-inspector-row"><dt>Position</dt><dd class="part-inspector-position"></dd></div>
+        <div class="part-inspector-row"><dt>Explosion</dt><dd class="part-inspector-progress"></dd></div>
+        <div class="part-inspector-row"><dt>Material</dt><dd class="part-inspector-material"></dd></div>
+      </dl>
+      <button type="button" class="btn part-inspector-reset">RESET</button>
+    `;
+    panelRoot.appendChild(this.root);
+
+    this._typeEl = this.root.querySelector('.part-inspector-type');
+    this._nameEl = this.root.querySelector('.part-inspector-name');
+    this._posEl = this.root.querySelector('.part-inspector-position');
+    this._progEl = this.root.querySelector('.part-inspector-progress');
+    this._matEl = this.root.querySelector('.part-inspector-material');
+
+    this.root
+      .querySelector('.part-inspector-reset')
+      .addEventListener('click', () => this.selectionManager.deselect());
+  }
+
+  /** `explodeProgress` is the active model's own current 0..1 scroll
+   *  progress (same value the panel's main progress bar shows), passed in
+   *  each tick rather than read some other way, so this stays a pure
+   *  function of "what's selected + what's the current progress" like the
+   *  rest of the experience. */
+  update(explodeProgress) {
+    const { selectedModel, selectedName } = this.selectionManager;
+    const isOpen = !!(selectedModel && selectedName);
+    if (isOpen !== this._isOpen) {
+      this._isOpen = isOpen;
+      this.root.classList.toggle('is-open', isOpen);
+    }
+    if (!isOpen) return;
+
+    const part = selectedModel.parts.get(selectedName);
+    if (!part) return;
+
+    this._typeEl.textContent = Utils.classifyPiece(selectedModel, selectedName) || '—';
+    this._nameEl.textContent = selectedName;
+
+    const p = part.object3D.position;
+    this._posEl.textContent = `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
+    this._progEl.textContent = `${Math.round(explodeProgress * 100)}%`;
+
+    // The selected piece's mesh(es) sit on the interactive clone while
+    // selected (see SelectionManager) — the true original, not the clone,
+    // is the one carrying the GLB-authored material name.
+    let materialName = '—';
+    part.object3D.traverse((obj) => {
+      if (materialName === '—' && obj.isMesh && obj.material) {
+        materialName = Utils.getOriginalMaterial(obj).name || '(unnamed)';
+      }
+    });
+    this._matEl.textContent = materialName;
+  }
+}
 
 /* ==========================================================================
    ThemeManager
@@ -1782,6 +1866,7 @@ class MasterExperience {
     };
 
     this.selectionManager = new SelectionManager(this.sceneManager, { getActiveModel });
+    this.partInspector = new PartInspector(this.panelRoot, { selectionManager: this.selectionManager });
 
     this.pieceHoverLabel = new PieceHoverLabel(this.sceneManager, this.panelRoot, {
       interactionController: this.interactionController,
@@ -1939,6 +2024,7 @@ class MasterExperience {
       this.pieceHoverLabel.forceRestoreImmediate?.();
     }
     this._phase = phase;
+    this.partInspector.update(t);
 
     // A plain global rather than a tighter coupling: PhysicsBackground (a
     // page-wide 2D-canvas decoration, deliberately kept independent of the
